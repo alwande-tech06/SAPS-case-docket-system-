@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Station cases — Police Official</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head"><p class="eyebrow">Police Official</p><h1>Cases at this station</h1></div>
+  <div class="folder" data-tab="Registered cases">
+    <div class="table-scroll"><table>
+      <thead><tr><th>Case number</th><th>Type</th><th>Complainant</th><th>Detective</th>
+        <th>Opened</th><th>Status</th></tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+</main>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const me = requireRole('official');
+if (me) {
+  renderChrome('official-cases.html');
+  const list = Store.dockets({ station_id: me.station_id });
+  document.getElementById('body').innerHTML = list.length ? list.map(d => {
+    const c = Store.complainant(d.complainant_id);
+    return `<tr><td class="ref">${esc(d.cas_number)}</td>
+      <td>${esc(Store.categoryName(d.category_id))}</td>
+      <td>${esc(c ? c.name : '—')}</td>
+      <td>${d.detective_id ? esc(Store.userName(d.detective_id)) : '<span class="badge badge-alert">Unassigned</span>'}</td>
+      <td>${esc(fmtDate(d.registered_at))}</td>
+      <td>${statusBadge(d.current_status)}</td></tr>`;
+  }).join('') : emptyRow(6, 'No cases registered at this station yet.');
+}
+</script>
+</body>
+</html>

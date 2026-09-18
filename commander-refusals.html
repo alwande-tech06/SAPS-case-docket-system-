@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refusals — Commander</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Station Commander</p>
+    <h1>Refusals and referrals</h1>
+    <p class="small muted" style="max-width:70ch">Every decision not to open a docket, with the
+    official who made it and the reason given. Nothing on this page can be deleted.</p>
+  </div>
+  <div class="folder" data-tab="Recorded refusals">
+    <div class="table-scroll"><table>
+      <thead><tr><th>Report</th><th>Official</th><th>Reason</th><th>Detail</th><th>When</th><th></th></tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+</main>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const me = requireRole('commander');
+if (me) {
+  renderChrome('commander-refusals.html');
+  draw();
+}
+function draw() {
+  const list = Store.refusals(me.station_id)
+    .sort((a,b) => new Date(b.refused_at) - new Date(a.refused_at));
+  document.getElementById('body').innerHTML = list.length ? list.map(r => {
+    const i = Store.intakes().find(x => x.id === r.intake_id);
+    return `<tr>
+      <td class="ref">${esc(i ? i.intake_number : '—')}</td>
+      <td>${esc(Store.userName(r.officer_id))}</td>
+      <td><span class="badge ${r.referred_to_station ? 'badge-neutral' : 'badge-alert'}">${esc(r.reason_category)}</span></td>
+      <td class="small">${esc(r.reason_detail)}${r.referred_to_station ? `<div class="muted">To ${esc(r.referred_to_station)}</div>` : ''}</td>
+      <td>${esc(fmtDateTime(r.refused_at))}</td>
+      <td class="actions">${r.reviewed_by ? '<span class="badge badge-good">Reviewed</span>'
+        : `<button class="btn btn-sm" data-open="${r.intake_id}">Open docket anyway</button>`}</td>
+    </tr>`;
+  }).join('') : emptyRow(6, 'No refusals recorded at this station.');
+
+  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => {
+    openModal('Overturn a refusal', `
+      <p class="small">Opening a docket after a refusal does not erase the refusal. Both decisions
+      stay in the record, which is what makes the pattern visible later.</p>
+      <div class="field"><label for="ov">Reason for overturning <span class="req">*</span></label>
+        <textarea id="ov"></textarea></div>`, () => {
+      const reason = document.getElementById('ov').value.trim();
+      if (!reason) { toast('Record why you are overturning this refusal.', 'alert'); return false; }
+      toast('Recorded. In the full system this reopens the report for disposition.');
+    }, 'Record decision');
+  });
+}
+</script>
+</body>
+</html>

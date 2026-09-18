@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pending reports — Police Official</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Police Official</p>
+    <h1>Reports awaiting a decision</h1>
+    <p class="small muted" style="max-width:70ch">Every report routed to this station appears here.
+    Each one must be closed with exactly one outcome: a docket is opened, a refusal is recorded
+    with reasons, or the matter is referred. There is no other way to clear a report from this list.</p>
+  </div>
+
+  <div class="grid grid-3" id="tiles"></div>
+
+  <div class="folder" data-tab="Pending queue" style="margin-top:1.6rem">
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Report number</th><th>Received</th><th>Type</th><th>Complainant</th>
+          <th>Age</th><th>Channel</th><th>Action</th>
+        </tr></thead>
+        <tbody id="pendingBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="folder" data-tab="Disposed today" style="margin-top:2rem">
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Report number</th><th>Type</th><th>Outcome</th><th>Case number</th><th>When</th></tr></thead>
+        <tbody id="disposedBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<footer class="foot">Prototype interface — data is stored in this browser only.</footer>
+
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script src="js/official.js"></script>
+</body>
+</html>

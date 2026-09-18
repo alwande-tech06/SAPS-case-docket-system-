@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture a report — Police Official</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap wrap-narrow">
+  <div class="page-head">
+    <p class="eyebrow">Assisted capture</p>
+    <h1>Capture a report for a complainant</h1>
+    <p class="small muted">For someone reporting in person or by telephone who cannot submit the
+    report themselves. Your name is recorded as the person who captured it.</p>
+  </div>
+
+  <div class="card">
+    <div class="field"><label for="name">Complainant's full name <span class="req">*</span></label>
+      <input type="text" id="name"></div>
+    <div class="field"><label for="contact">Contact number <span class="req">*</span></label>
+      <input type="tel" id="contact"></div>
+    <div class="field"><label for="category">Type of incident <span class="req">*</span></label>
+      <select id="category"></select></div>
+    <div class="row row-2">
+      <div class="field"><label for="idate">Date <span class="req">*</span></label>
+        <input type="date" id="idate"></div>
+      <div class="field"><label for="itime">Time</label><input type="time" id="itime"></div>
+    </div>
+    <div class="field"><label for="location">Where it happened <span class="req">*</span></label>
+      <input type="text" id="location"></div>
+    <div class="field"><label for="description">What happened <span class="req">*</span></label>
+      <textarea id="description"></textarea></div>
+    <div class="field"><label for="channel">How was this reported <span class="req">*</span></label>
+      <select id="channel">
+        <option value="assisted">In person at this station</option>
+        <option value="assisted">By telephone</option>
+        <option value="third_party">By a third party on their behalf</option>
+      </select></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="capture">Capture report</button>
+      <a class="btn" href="dashboard-official.html">Cancel</a>
+    </div>
+  </div>
+
+  <div id="done" style="margin-top:1rem"></div>
+</main>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const me = requireRole('official');
+if (me) {
+  renderChrome('official-capture.html');
+  const cat = document.getElementById('category');
+  Store.categories().forEach(c => cat.insertAdjacentHTML('beforeend',
+    `<option value="${c.id}">${esc(c.name)}</option>`));
+  document.getElementById('idate').value = new Date().toISOString().slice(0,10);
+
+  document.getElementById('capture').onclick = () => {
+    const f = id => document.getElementById(id).value.trim();
+    if (!f('name') || !f('contact') || !f('location') || !f('description')) {
+      toast('Name, contact, location and description are all required.', 'alert'); return;
+    }
+    const d = document.getElementById('idate').value;
+    const t = document.getElementById('itime').value || '00:00';
+    const rec = Store.submitReport({
+      name: f('name'), contact: f('contact'), category_id: cat.value,
+      station_id: me.station_id, channel: document.getElementById('channel').value,
+      description: f('description'), location: f('location'),
+      incident_datetime: new Date(d + 'T' + t).toISOString(), created_by: me.id
+    });
+    document.getElementById('done').innerHTML = `
+      ${stampBlock('Give this number to the complainant', rec.intake_number, 'Received')}
+      <div class="btn-row" style="margin-top:1rem">
+        <a class="btn btn-primary" href="dashboard-official.html">Back to pending reports</a>
+        <button class="btn" onclick="location.reload()">Capture another</button>
+      </div>`;
+    document.getElementById('done').scrollIntoView({behavior:'smooth'});
+    toast('Report captured. It now appears in the pending queue.');
+  };
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report a crime — SAPS Case Docket Accountability System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap">
+  <section class="hero">
+    <p class="eyebrow">South African Police Service</p>
+    <h1>Report a crime from anywhere, and keep proof that you did.</h1>
+    <p class="lead">
+      You do not need an account, and you do not need to be at a police station.
+      Your report is recorded and given a reference number the moment you submit it,
+      before any police official sees it.
+    </p>
+    <div class="btn-row" style="margin-top:1.4rem">
+      <a class="btn btn-primary" href="report.html">Report a crime</a>
+      <a class="btn" href="track.html">Track a report I already made</a>
+    </div>
+  </section>
+
+  <div class="emergency">
+    Crime in progress or someone in danger? Call 10111 now. This form is for reporting
+    incidents that have already happened.
+  </div>
+
+  <div class="split">
+    <div class="folder" data-tab="How it works">
+      <ol class="timeline" style="list-style:none">
+        <li>
+          <div class="when">Step 1</div>
+          <strong>You submit a report</strong>
+          <p class="small muted">Tell us what happened, where, and how to reach you. We send a code to
+          confirm your number.</p>
+        </li>
+        <li>
+          <div class="when">Step 2</div>
+          <strong>You receive a reference number</strong>
+          <p class="small muted">Keep it. It is your proof that the report exists, and it is issued
+          before any police decision is taken.</p>
+        </li>
+        <li>
+          <div class="when">Step 3</div>
+          <strong>The report is routed to the nearest station</strong>
+          <p class="small muted">Jurisdiction is decided by the system from the incident location,
+          not by whoever you speak to.</p>
+        </li>
+        <li>
+          <div class="when">Step 4</div>
+          <strong>An official must record an outcome</strong>
+          <p class="small muted">A docket is opened, a refusal is recorded with reasons, or the
+          matter is referred. There is no fourth option, and none of these can be deleted.</p>
+        </li>
+        <li>
+          <div class="when">Step 5</div>
+          <strong>You are told if nothing happens</strong>
+          <p class="small muted">If no case number is issued within 24 hours, the system notifies you
+          and raises the matter with the station commander.</p>
+        </li>
+      </ol>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card-head"><h3>Other ways to report</h3></div>
+        <ul class="channel-list">
+          <li><span class="k">In person</span><span>Any police station. Ask for your report reference number before you leave.</span></li>
+          <li><span class="k">By phone</span><span>The service complaints call centre can capture a report on your behalf.</span></li>
+          <li><span class="k">On your behalf</span><span>A school, clinic or shelter may report for someone who cannot.</span></li>
+          <li><span class="k">USSD</span><span>Planned. Will use the same reporting path as this page.</span></li>
+        </ul>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="card-head"><h3>Your information</h3></div>
+        <p class="small muted">
+          Your details are handled under the Protection of Personal Information Act.
+          Only the officials handling your case can see them, and every time someone
+          opens your case it is recorded.
+        </p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  Prototype interface — SODM401 / SFEN301 group project, 2026. Data is stored in this
+  browser only and is cleared when you reset it.
+</footer>
+
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>renderPublicHeader();</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report an incident — SAPS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap wrap-narrow">
+  <div class="emergency">
+    Emergency in progress? Call 10111. Do not use this form.
+  </div>
+
+  <div class="steps">
+    <span class="step is-active" id="s1">1 — Incident</span>
+    <span class="step" id="s2">2 — Contact</span>
+    <span class="step" id="s3">3 — Reference</span>
+  </div>
+
+  <!-- STEP 1 -->
+  <section class="card" id="step1">
+    <div class="card-head"><h2>What happened</h2></div>
+    <div class="field">
+      <label for="category">Type of incident <span class="req">*</span></label>
+      <select id="category"><option value="">Select a category</option></select>
+    </div>
+    <div class="row row-2">
+      <div class="field">
+        <label for="idate">Date it happened <span class="req">*</span></label>
+        <input type="date" id="idate">
+      </div>
+      <div class="field">
+        <label for="itime">Approximate time</label>
+        <input type="time" id="itime">
+      </div>
+    </div>
+    <div class="field">
+      <label for="location">Where it happened <span class="req">*</span></label>
+      <input type="text" id="location" placeholder="Street, suburb or a landmark nearby">
+      <p class="hint">Your report is sent to the station responsible for this area. You do not
+        need to work out which station that is.</p>
+    </div>
+    <div class="field">
+      <label for="description">Describe what happened <span class="req">*</span></label>
+      <textarea id="description" placeholder="What happened, who was involved, and anything that might help identify them."></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="toStep2">Continue</button>
+      <a class="btn" href="index.html">Cancel</a>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="card" id="step2" hidden>
+    <div class="card-head"><h2>How to reach you</h2></div>
+    <div class="field">
+      <label for="name">Your full name <span class="req">*</span></label>
+      <input type="text" id="name" placeholder="Name and surname">
+    </div>
+    <div class="field">
+      <label for="contact">Mobile number <span class="req">*</span></label>
+      <input type="tel" id="contact" placeholder="+27 ...">
+      <p class="hint">We send a six-digit code to this number to confirm it is yours.</p>
+    </div>
+
+    <div id="otpBox" hidden>
+      <div class="notice">
+        <strong>Verification code sent</strong>
+        In the finished system this arrives by SMS. For this prototype the code is
+        shown here: <span class="ref" id="otpShown"></span>
+      </div>
+      <div class="field">
+        <label for="otp">Enter the six-digit code <span class="req">*</span></label>
+        <input type="text" id="otp" inputmode="numeric" maxlength="6" placeholder="000000">
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="sendOtp">Send code</button>
+      <button class="btn btn-primary" id="submitReport" hidden>Submit report</button>
+      <button class="btn" id="backTo1">Back</button>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section id="step3" hidden>
+    <div class="card">
+      <div class="card-head"><h2>Report received</h2></div>
+      <div class="evidence-row" id="stampHost"></div>
+      <p class="small muted" style="margin-top:.9rem">
+        Write this number down, take a screenshot, or save the QR code. Any of these is proof
+        that you reported this — you will need one of them to check your case or to escalate it.
+      </p>
+      <dl class="small" style="margin:1rem 0 0">
+        <div style="display:flex;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border-soft)">
+          <span class="muted" style="min-width:120px">Submitted</span><span id="rSubmitted"></span></div>
+        <div style="display:flex;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border-soft)">
+          <span class="muted" style="min-width:120px">Routed to</span><span id="rStation"></span></div>
+        <div style="display:flex;gap:.6rem;padding:.35rem 0">
+          <span class="muted" style="min-width:120px">Status</span><span id="rStatus"></span></div>
+      </dl>
+      <div class="notice" style="margin-top:1rem">
+        <strong>If nothing happens</strong>
+        If no case number is issued within 24 hours, the system notifies you automatically
+        and places the report on the station commander's dashboard. You do not have to chase it.
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-primary" href="track.html">Track this report</a>
+        <a class="btn" href="index.html">Done</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">Prototype interface — data is stored in this browser only.</footer>
+
+<script src="js/store.js"></script>
+<script src="js/vendor-qrcode.js"></script>
+<script src="js/app.js"></script>
+<script src="js/report.js"></script>
+</body>
+</html>

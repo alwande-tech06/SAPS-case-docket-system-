@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff sign in — SAPS Case Docket Accountability System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="login-wrap">
+  <p class="eyebrow">Restricted access</p>
+  <h1>Staff sign in</h1>
+  <p class="small muted">Every action you take in this system is recorded against your name
+  and the role you hold at the time.</p>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="field">
+      <label for="email">Email address</label>
+      <input type="text" id="email" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="signIn" style="width:100%">Sign in</button>
+    <div id="loginError"></div>
+  </div>
+
+  <div class="demo-users">
+    <p class="eyebrow">Demonstration accounts — tap to fill</p>
+    <div id="demoList"></div>
+    <p class="small muted" style="margin-top:.6rem">Password for all accounts: <span class="ref">demo1234</span></p>
+  </div>
+
+  <div class="btn-row" style="margin-top:1.2rem">
+    <a class="btn btn-sm" href="index.html">Public reporting</a>
+    <button class="btn btn-sm" id="resetData">Reset demonstration data</button>
+  </div>
+</main>
+
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+if (Store.session()) location.replace(ROLE_HOME[Store.session().role]);
+
+const demo = [
+  { email: 'official@saps.demo',  label: 'Sgt. M. Dlamini',  role: 'Police Official' },
+  { email: 'detective@saps.demo', label: 'Det. S. Pillay',   role: 'Detective' },
+  { email: 'commander@saps.demo', label: 'Col. N. Zulu',     role: 'Station Commander' },
+  { email: 'admin@saps.demo',     label: 'A. Sithole',       role: 'Administrator' }
+];
+
+document.getElementById('demoList').innerHTML = demo.map(d =>
+  `<button data-email="${d.email}"><span class="r">${d.role}</span><br>${d.label}</button>`).join('');
+
+document.querySelectorAll('#demoList button').forEach(b => {
+  b.onclick = () => {
+    document.getElementById('email').value = b.dataset.email;
+    document.getElementById('password').value = 'demo1234';
+    signIn();
+  };
+});
+
+function signIn() {
+  const res = Store.login(
+    document.getElementById('email').value,
+    document.getElementById('password').value);
+  const box = document.getElementById('loginError');
+  if (!res.ok) {
+    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Cannot sign in</strong>${esc(res.error)}</div>`;
+    return;
+  }
+  location.href = ROLE_HOME[res.user.role];
+}
+
+document.getElementById('signIn').onclick = signIn;
+document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+
+document.getElementById('resetData').onclick = () => {
+  Store.reset();
+  location.reload();
+};
+</script>
+</body>
+</html>

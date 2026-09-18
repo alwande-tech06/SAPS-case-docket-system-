@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit trail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Oversight</p>
+    <h1>Audit trail</h1>
+    <p class="small muted">Every action on every case, including your own inspection of this page.</p>
+  </div>
+
+  <div class="card">
+    <div class="grid grid-3">
+      <div class="field" style="margin:0"><label for="fUser">Filter by user</label>
+        <select id="fUser"><option value="">All users</option></select></div>
+      <div class="field" style="margin:0"><label for="fAction">Filter by action</label>
+        <select id="fAction"><option value="">All actions</option></select></div>
+      <div class="field" style="margin:0"><label for="fCase">Filter by case</label>
+        <select id="fCase"><option value="">All cases</option></select></div>
+    </div>
+  </div>
+
+  <div class="folder" data-tab="Ledger" style="margin-top:1.6rem">
+    <div id="ledger"></div>
+  </div>
+</main>
+<footer class="foot">Prototype interface — data is stored in this browser only.</footer>
+
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const s = Store.session();
+if (!s) location.replace('login.html');
+else if (s.role !== 'commander' && s.role !== 'admin') location.replace(ROLE_HOME[s.role]);
+else {
+  renderChrome('audit.html');
+
+  const uSel = document.getElementById('fUser');
+  Store.users().forEach(u => uSel.insertAdjacentHTML('beforeend',
+    `<option value="${u.id}">${esc(u.name)}</option>`));
+
+  const aSel = document.getElementById('fAction');
+  [...new Set(Store.audit().map(a => a.action_type))].sort().forEach(a =>
+    aSel.insertAdjacentHTML('beforeend', `<option value="${esc(a)}">${esc(a)}</option>`));
+
+  const cSel = document.getElementById('fCase');
+  Store.dockets().forEach(d => cSel.insertAdjacentHTML('beforeend',
+    `<option value="${d.id}">${esc(d.cas_number)}</option>`));
+
+  function draw() {
+    renderLedger(Store.audit({
+      user_id: uSel.value || null,
+      action_type: aSel.value || null,
+      case_id: cSel.value || null
+    }), 'ledger');
+  }
+  [uSel, aSel, cSel].forEach(el => el.onchange = draw);
+  draw();
+}
+</script>
+</body>
+</html>

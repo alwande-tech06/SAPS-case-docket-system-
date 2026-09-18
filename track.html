@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track my report — SAPS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap wrap-narrow">
+  <div class="page-head">
+    <p class="eyebrow">Complainant</p>
+    <h1>Track your report</h1>
+  </div>
+
+  <section class="card" id="lookup">
+    <div class="field">
+      <label for="ref">Reference or case number <span class="req">*</span></label>
+      <input type="text" id="ref" placeholder="INT-2026-DBN-000001 or CAS-2026-DBN-000001">
+    </div>
+    <div class="field">
+      <label for="surname">Your surname <span class="req">*</span></label>
+      <input type="text" id="surname" placeholder="As given when you reported">
+      <p class="hint">Both are needed so that nobody else can read your case.</p>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="find">Find my report</button>
+      <a class="btn" href="index.html">Back</a>
+    </div>
+    <div id="lookupError"></div>
+  </section>
+
+  <section id="result" hidden></section>
+</main>
+
+<footer class="foot">Prototype interface — data is stored in this browser only.</footer>
+
+<script src="js/store.js"></script>
+<script src="js/vendor-qrcode.js"></script>
+<script src="js/app.js"></script>
+<script src="js/track.js"></script>
+</body>
+</html>

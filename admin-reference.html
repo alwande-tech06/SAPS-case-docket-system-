@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference data — Administrator</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Administrator</p><h1>Reference data</h1>
+    <p class="small muted">Crime categories decide which specialisation a case is assigned to,
+    and how long the station has before the service level is breached.</p>
+  </div>
+  <div class="split">
+    <div class="folder" data-tab="Crime categories">
+      <div class="table-scroll"><table>
+        <thead><tr><th>Category</th><th>Requires specialisation</th><th>Service level</th></tr></thead>
+        <tbody id="catBody"></tbody>
+      </table></div>
+    </div>
+    <div>
+      <div class="folder" data-tab="Stations"><div id="stBody"></div></div>
+      <div class="folder" data-tab="Specialisations" style="margin-top:2rem"><div id="spBody"></div></div>
+    </div>
+  </div>
+</main>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const me = requireRole('admin');
+if (me) {
+  renderChrome('admin-reference.html');
+  document.getElementById('catBody').innerHTML = Store.categories().map(c => {
+    const s = Store.specialisations().find(x => x.id === c.required_specialisation_id);
+    return `<tr><td>${esc(c.name)}</td><td class="small">${esc(s ? s.name : '—')}</td>
+      <td>${c.sla_days} days</td></tr>`;
+  }).join('');
+  document.getElementById('stBody').innerHTML = Store.stations().map(s =>
+    `<div style="padding:.5rem 0;border-bottom:1px solid var(--border-soft)">
+      <strong>${esc(s.name)}</strong> <span class="ref small muted">${esc(s.code)}</span>
+      <div class="small muted">${esc(s.province)}</div></div>`).join('');
+  document.getElementById('spBody').innerHTML = Store.specialisations().map(s =>
+    `<div style="padding:.5rem 0;border-bottom:1px solid var(--border-soft)" class="small">${esc(s.name)}</div>`).join('');
+}
+</script>
+</body>
+</html>

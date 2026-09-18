@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>All station cases — Commander</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head"><p class="eyebrow">Station Commander</p><h1>All cases at this station</h1></div>
+  <div class="folder" data-tab="Case register">
+    <div class="table-scroll"><table>
+      <thead><tr><th>Case number</th><th>Type</th><th>Detective</th><th>Opened</th>
+        <th>Last activity</th><th>Status</th><th></th></tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+  <section id="trail" style="margin-top:2rem"></section>
+</main>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const me = requireRole('commander');
+if (me) {
+  renderChrome('commander-cases.html');
+  const list = Store.dockets({ station_id: me.station_id });
+  document.getElementById('body').innerHTML = list.length ? list.map(d => {
+    const late = (Date.now() - new Date(d.last_activity_at).getTime()) > 30*864e5;
+    return `<tr><td class="ref">${esc(d.cas_number)}</td>
+      <td>${esc(Store.categoryName(d.category_id))}</td>
+      <td>${d.detective_id ? esc(Store.userName(d.detective_id)) : '<span class="badge badge-alert">Unassigned</span>'}</td>
+      <td>${esc(fmtDate(d.registered_at))}</td>
+      <td>${late ? `<span class="badge badge-alert">${esc(ageFrom(d.last_activity_at))} ago</span>` : esc(fmtDate(d.last_activity_at))}</td>
+      <td>${statusBadge(d.current_status)}</td>
+      <td class="actions"><button class="btn btn-sm" data-trail="${d.id}">View audit trail</button></td></tr>`;
+  }).join('') : emptyRow(7, 'No cases registered yet.');
+
+  document.querySelectorAll('[data-trail]').forEach(b => b.onclick = () => {
+    const d = Store.docket(Number(b.dataset.trail));
+    document.getElementById('trail').innerHTML =
+      `<div class="folder" data-tab="Audit trail — ${esc(d.cas_number)}"><div id="lg"></div></div>`;
+    renderLedger(Store.audit({ case_id: d.id }), 'lg');
+    document.getElementById('trail').scrollIntoView({behavior:'smooth'});
+  });
+}
+</script>
+</body>
+</html>
