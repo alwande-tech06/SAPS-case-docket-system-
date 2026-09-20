@@ -20,13 +20,16 @@
 
   <section class="card" id="lookup">
     <div class="field">
-      <label for="ref">Reference or case number <span class="req">*</span></label>
-      <input type="text" id="ref" placeholder="INT-2026-DBN-000001 or CAS-2026-DBN-000001">
+      <label for="ref">Reference, case number, complainant ID, or ID number <span class="req">*</span></label>
+      <input type="text" id="ref" placeholder="INT-2026-DBN-000001, CAS-2026-DBN-000001, CMP-000001, or your 13-digit ID number">
+      <p class="hint">A reference or case number opens that one report. Your complainant ID or your
+        South African ID number shows every report you have made.</p>
     </div>
     <div class="field">
-      <label for="surname">Your surname <span class="req">*</span></label>
-      <input type="text" id="surname" placeholder="As given when you reported">
-      <p class="hint">Both are needed so that nobody else can read your case.</p>
+      <label for="fullname">Your full name (name and surname) <span class="req">*</span></label>
+      <input type="text" id="fullname" placeholder="Exactly as given when you reported">
+      <p class="hint">Both fields above are needed so that nobody else can read your case.
+        Your name must be typed exactly as you gave it when you reported, including capital letters.</p>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" id="find">Find my report</button>

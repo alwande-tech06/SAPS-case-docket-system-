@@ -19,9 +19,21 @@
 
   <div class="card">
     <div class="field"><label for="name">Complainant's full name <span class="req">*</span></label>
-      <input type="text" id="name"></div>
+      <input type="text" id="name" placeholder="Name and surname"></div>
+    <div class="field">
+      <label>Gender <span class="req">*</span></label>
+      <div class="choice-row">
+        <label class="choice"><input type="radio" name="gender" value="Female">Female</label>
+        <label class="choice"><input type="radio" name="gender" value="Male">Male</label>
+        <label class="choice"><input type="radio" name="gender" value="Other">Other</label>
+      </div>
+    </div>
     <div class="field"><label for="contact">Contact number <span class="req">*</span></label>
-      <input type="tel" id="contact"></div>
+      <input type="tel" id="contact" placeholder="e.g. 082 555 0141 or +27 82 555 0141"></div>
+    <div class="field"><label for="idnum">South African ID number <span class="req">*</span></label>
+      <input type="text" id="idnum" inputmode="numeric" maxlength="13" placeholder="13 digits">
+      <p class="hint">The online form is restricted to complainants aged 18 and over. That limit does
+        not apply here: a minor's complaint must still be recorded, captured by you on their behalf.</p></div>
     <div class="field"><label for="category">Type of incident <span class="req">*</span></label>
       <select id="category"></select></div>
     <div class="row row-2">
@@ -63,22 +75,43 @@ if (me) {
     if (!f('name') || !f('contact') || !f('location') || !f('description')) {
       toast('Name, contact, location and description are all required.', 'alert'); return;
     }
+    if (!hasNameAndSurname(f('name'))) {
+      toast('Enter both the complainant\'s first name and surname.', 'alert'); return;
+    }
+    const genderChoice = document.querySelector('input[name="gender"]:checked');
+    if (!genderChoice) { toast('Select the complainant\'s gender.', 'alert'); return; }
+    if (!isValidSaMobile(f('contact'))) {
+      toast('Enter a valid South African mobile number, e.g. 082 555 0141.', 'alert'); return;
+    }
+    if (!/^\d{13}$/.test(f('idnum'))) {
+      toast('Enter the complainant\'s 13-digit South African ID number.', 'alert'); return;
+    }
+    const age = ageFromSaId(f('idnum'));
+    if (age === null) {
+      toast('That ID number is not valid — the first six digits must be a real date of birth.', 'alert'); return;
+    }
     const d = document.getElementById('idate').value;
     const t = document.getElementById('itime').value || '00:00';
     const rec = Store.submitReport({
-      name: f('name'), contact: f('contact'), category_id: cat.value,
+      name: f('name'), contact: f('contact'), id_number: f('idnum'),
+      gender: genderChoice.value, category_id: cat.value,
       station_id: me.station_id, channel: document.getElementById('channel').value,
       description: f('description'), location: f('location'),
       incident_datetime: new Date(d + 'T' + t).toISOString(), created_by: me.id
     });
+    const comp = Store.complainant(rec.complainant_id);
     document.getElementById('done').innerHTML = `
       ${stampBlock('Give this number to the complainant', rec.intake_number, 'Received')}
+      <p class="small muted" style="margin-top:.8rem">Complainant ID (identifies them across any
+        future report): <span class="ref">${esc(comp.complainant_number)}</span></p>
       <div class="btn-row" style="margin-top:1rem">
         <a class="btn btn-primary" href="dashboard-official.html">Back to pending reports</a>
         <button class="btn" onclick="location.reload()">Capture another</button>
       </div>`;
     document.getElementById('done').scrollIntoView({behavior:'smooth'});
-    toast('Report captured. It now appears in the pending queue.');
+    toast(age < 18
+      ? `Report captured for a complainant aged ${age}. Record the guardian's details in the statement.`
+      : 'Report captured. It now appears in the pending queue.', age < 18 ? 'alert' : undefined);
   };
 }
 </script>

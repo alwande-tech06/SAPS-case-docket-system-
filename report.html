@@ -42,13 +42,19 @@
     </div>
     <div class="field">
       <label for="location">Where it happened <span class="req">*</span></label>
-      <input type="text" id="location" placeholder="Street, suburb or a landmark nearby">
-      <p class="hint">Your report is sent to the station responsible for this area. You do not
-        need to work out which station that is.</p>
+      <input type="text" id="location" placeholder="Street, suburb or a landmark nearby, e.g. Glenwood, Umlazi, Pinetown">
+      <p class="hint">Your report is routed automatically to the police station responsible for this
+        area based on the suburb or landmark you give. You do not need to work out which station that is.</p>
     </div>
     <div class="field">
       <label for="description">Describe what happened <span class="req">*</span></label>
       <textarea id="description" placeholder="What happened, who was involved, and anything that might help identify them."></textarea>
+    </div>
+    <div class="field">
+      <label for="files">Evidence — photos or documents (optional)</label>
+      <input type="file" id="files" multiple accept="image/*,.pdf,.doc,.docx">
+      <p class="hint">Up to 5 files, 2 MB each. Photos of the scene or damage, or any document
+        that supports your report.</p>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" id="toStep2">Continue</button>
@@ -62,11 +68,29 @@
     <div class="field">
       <label for="name">Your full name <span class="req">*</span></label>
       <input type="text" id="name" placeholder="Name and surname">
+      <p class="hint">Both your first name and surname are needed.</p>
+    </div>
+    <div class="field">
+      <label>Gender <span class="req">*</span></label>
+      <div class="choice-row">
+        <label class="choice"><input type="radio" name="gender" value="Female">Female</label>
+        <label class="choice"><input type="radio" name="gender" value="Male">Male</label>
+        <label class="choice"><input type="radio" name="gender" value="Other">Other</label>
+      </div>
     </div>
     <div class="field">
       <label for="contact">Mobile number <span class="req">*</span></label>
-      <input type="tel" id="contact" placeholder="+27 ...">
-      <p class="hint">We send a six-digit code to this number to confirm it is yours.</p>
+      <input type="tel" id="contact" placeholder="e.g. 082 555 0141 or +27 82 555 0141">
+      <p class="hint">A South African mobile number. We send a six-digit code to this number to
+        confirm it is yours.</p>
+    </div>
+    <div class="field">
+      <label for="idnum">South African ID number <span class="req">*</span></label>
+      <input type="text" id="idnum" inputmode="numeric" maxlength="13" placeholder="13 digits, e.g. 9001015800086">
+      <p class="hint">This identifies you uniquely across any report you make, separately from your
+        phone number or name, and you can use it to track your cases later.
+        You must be 18 or older to report online — your date of birth is read from this number.
+        If you are under 18, an adult can report for you, or you can report at any police station.</p>
     </div>
 
     <div id="otpBox" hidden>
@@ -99,12 +123,19 @@
       </p>
       <dl class="small" style="margin:1rem 0 0">
         <div style="display:flex;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border-soft)">
+          <span class="muted" style="min-width:120px">Your complainant ID</span><span class="ref" id="rComplainant"></span></div>
+        <div style="display:flex;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border-soft)">
           <span class="muted" style="min-width:120px">Submitted</span><span id="rSubmitted"></span></div>
         <div style="display:flex;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border-soft)">
           <span class="muted" style="min-width:120px">Routed to</span><span id="rStation"></span></div>
         <div style="display:flex;gap:.6rem;padding:.35rem 0">
           <span class="muted" style="min-width:120px">Status</span><span id="rStatus"></span></div>
       </dl>
+      <div class="notice" style="margin-top:.9rem">
+        <strong>Keep your complainant ID too</strong>
+        This identifies you personally and stays the same across any report you make in future.
+        It is separate from the reference number above, which identifies this specific report.
+      </div>
       <div class="notice" style="margin-top:1rem">
         <strong>If nothing happens</strong>
         If no case number is issued within 24 hours, the system notifies you automatically

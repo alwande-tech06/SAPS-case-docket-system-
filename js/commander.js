@@ -11,6 +11,7 @@ function render() {
   const unassigned = Store.dockets({ station_id: st })
     .filter(d => d.current_status === 'awaiting_assignment');
   const refusalCount = Store.refusals(st).length;
+  const withdrawalsPending = Store.withdrawals({ status: 'pending' }).length;
 
   document.getElementById('tiles').innerHTML = `
     <div class="stat${rec.undisposed.length ? ' alert' : ''}">
@@ -21,7 +22,9 @@ function render() {
       <div class="n">${stale.length}</div><div class="k">Stale 30+ days</div></div>
     <div class="stat"><div class="n">${refusalCount}</div><div class="k">Refusals recorded</div></div>
     <div class="stat${unassigned.length ? ' alert' : ''}">
-      <div class="n">${unassigned.length}</div><div class="k">Awaiting assignment</div></div>`;
+      <div class="n">${unassigned.length}</div><div class="k">Awaiting assignment</div></div>
+    <div class="stat${withdrawalsPending ? ' alert' : ''}">
+      <div class="n">${withdrawalsPending}</div><div class="k">Withdrawal requests pending</div></div>`;
 
   /* attention list */
   const rows = [];

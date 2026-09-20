@@ -25,6 +25,8 @@
   --alert-wash:  #FBEAE8;
   --brass:       #8A6A20;
   --brass-wash:  #F5EEDC;
+  --critical:      #7A1230;
+  --critical-wash: #F7E4E9;
 
   --shadow: 0 1px 2px rgba(20,24,31,.04), 0 8px 24px rgba(20,24,31,.06);
   --radius: 8px;
@@ -281,6 +283,7 @@ td.actions { white-space: nowrap; }
 .badge-good    { color: var(--good);  background: var(--good-wash); }
 .badge-alert   { color: var(--alert); background: var(--alert-wash); }
 .badge-brass   { color: var(--accent); background: var(--accent-wash); }
+.badge-critical { color: var(--critical); background: var(--critical-wash); }
 
 /* ---------- Forms ---------- */
 .field { margin-bottom: 1rem; }
@@ -308,6 +311,23 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
 }
 .hint { font-size: .78rem; color: var(--muted); margin-top: .3rem; }
+
+/* Tick-box choice group (gender and similar single-choice fields) */
+.choice-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+.choice {
+  display: inline-flex; align-items: center; gap: .45rem;
+  margin-bottom: 0;
+  padding: .55rem .8rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: .9rem; font-weight: 500; color: var(--ink);
+  cursor: pointer;
+}
+.choice input { width: auto; margin: 0; accent-color: var(--accent); }
+.choice:hover { border-color: var(--accent); }
+.choice:has(input:checked) {
+  border-color: var(--accent); background: var(--accent-wash); font-weight: 600;
+}
 .row { display: grid; gap: .8rem; grid-template-columns: 1fr; }
 @media (min-width: 620px) { .row-2 { grid-template-columns: 1fr 1fr; } }
 
@@ -457,6 +477,34 @@ input:focus, select:focus, textarea:focus {
   margin-top: 2.5rem; padding: 1.1rem 1.25rem;
   font-size: .78rem; color: var(--muted);
   max-width: 1180px; margin-inline: auto;
+}
+
+/* ---------- Attachments (complainant evidence, exhibit images) ---------- */
+.exhibit-thumb {
+  width: 48px; height: 48px; object-fit: cover;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+/* Data-URL attachments cannot be opened in a new tab (browsers block top-level
+   navigation to data:), so they enlarge in place instead. */
+.attachment-preview { cursor: zoom-in; }
+.attachment-preview.is-expanded {
+  width: 100%; max-width: 460px; height: auto; max-height: 70vh;
+  object-fit: contain; cursor: zoom-out;
+  display: block; margin: .4rem 0;
+  background: var(--surface-sunk);
+}
+.file-chip {
+  display: inline-block;
+  font-family: var(--sans); font-size: .78rem; font-weight: 600;
+  color: var(--accent); background: var(--accent-wash);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: .3rem .55rem; text-decoration: none;
+}
+.attachment-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .4rem 0; }
+.suspect-link {
+  display: flex; gap: .5rem; align-items: center;
+  margin-top: .45rem; padding-top: .45rem;
+  border-top: 1px solid var(--border-soft);
 }
 
 .empty {

@@ -13,7 +13,7 @@
   <div class="page-head"><p class="eyebrow">Station Commander</p><h1>All cases at this station</h1></div>
   <div class="folder" data-tab="Case register">
     <div class="table-scroll"><table>
-      <thead><tr><th>Case number</th><th>Type</th><th>Detective</th><th>Opened</th>
+      <thead><tr><th>Case number</th><th>Type</th><th>Priority</th><th>Detective</th><th>Opened</th>
         <th>Last activity</th><th>Status</th><th></th></tr></thead>
       <tbody id="body"></tbody>
     </table></div>
@@ -31,12 +31,13 @@ if (me) {
     const late = (Date.now() - new Date(d.last_activity_at).getTime()) > 30*864e5;
     return `<tr><td class="ref">${esc(d.cas_number)}</td>
       <td>${esc(Store.categoryName(d.category_id))}</td>
+      <td>${priorityBadge(d.priority)}</td>
       <td>${d.detective_id ? esc(Store.userName(d.detective_id)) : '<span class="badge badge-alert">Unassigned</span>'}</td>
       <td>${esc(fmtDate(d.registered_at))}</td>
       <td>${late ? `<span class="badge badge-alert">${esc(ageFrom(d.last_activity_at))} ago</span>` : esc(fmtDate(d.last_activity_at))}</td>
       <td>${statusBadge(d.current_status)}</td>
       <td class="actions"><button class="btn btn-sm" data-trail="${d.id}">View audit trail</button></td></tr>`;
-  }).join('') : emptyRow(7, 'No cases registered yet.');
+  }).join('') : emptyRow(8, 'No cases registered yet.');
 
   document.querySelectorAll('[data-trail]').forEach(b => b.onclick = () => {
     const d = Store.docket(Number(b.dataset.trail));

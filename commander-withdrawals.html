@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Withdrawal requests — Commander</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="chrome"></div>
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Station Commander</p>
+    <h1>Withdrawal requests</h1>
+    <p class="small muted" style="max-width:70ch">Every request a complainant makes to withdraw a case,
+    with the reason given and the decision made. The official or detective handling the case cannot
+    decide these themselves — that is deliberate, so a case cannot be made to disappear quietly.</p>
+  </div>
+  <div class="folder" data-tab="Requests">
+    <div class="table-scroll"><table>
+      <thead><tr><th>Report</th><th>Reason</th><th>Requested</th><th>Category</th><th>Decision</th><th></th></tr></thead>
+      <tbody id="body"></tbody>
+    </table></div>
+  </div>
+</main>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<script>
+const me = requireRole('commander');
+if (me) {
+  renderChrome('commander-withdrawals.html');
+  draw();
+}
+
+function draw() {
+  const list = Store.withdrawals();
+  document.getElementById('body').innerHTML = list.length ? list.map(w => {
+    const i = Store.intakes().find(x => x.id === w.intake_id);
+    const d = w.docket_id ? Store.docket(w.docket_id) : null;
+    return `<tr>
+      <td class="ref">${esc(d ? d.cas_number : (i ? i.intake_number : '—'))}</td>
+      <td class="small">${esc(w.reason_category)}${w.reason_detail ? `<div class="muted">${esc(w.reason_detail)}</div>` : ''}</td>
+      <td>${esc(fmtDateTime(w.requested_at))}</td>
+      <td>${w.protected_category ? '<span class="badge badge-alert">Cannot be auto-approved</span>' : '<span class="badge badge-neutral">Standard</span>'}</td>
+      <td>${w.status === 'pending' ? '<span class="badge badge-alert">Awaiting decision</span>'
+        : `<span class="badge badge-good">${esc(w.decision)}</span><div class="small muted">${esc(w.decision_reason || '')}</div>`}</td>
+      <td class="actions">${w.status === 'pending' ? `<button class="btn btn-sm btn-primary" data-decide="${w.id}">Decide</button>` : ''}</td>
+    </tr>`;
+  }).join('') : emptyRow(6, 'No withdrawal requests have been made.');
+
+  document.querySelectorAll('[data-decide]').forEach(b => b.onclick = () => {
+    const w = Store.withdrawals().find(x => x.id === Number(b.dataset.decide));
+    const i = Store.intakes().find(x => x.id === w.intake_id);
+    const d = w.docket_id ? Store.docket(w.docket_id) : null;
+    openModal('Decide a withdrawal request', `
+      <div class="notice"><strong>${esc(d ? d.cas_number : (i ? i.intake_number : '—'))}</strong>
+        ${esc(w.reason_category)}${w.reason_detail ? ` — ${esc(w.reason_detail)}` : ''}</div>
+      ${w.protected_category ? `<div class="notice notice-alert">
+        <strong>This category cannot be fully withdrawn</strong>
+        The case can only be noted, not closed by withdrawal alone — the investigation may continue
+        in the public interest.</div>` : ''}
+      <div class="field"><label for="dec">Decision <span class="req">*</span></label>
+        <select id="dec">
+          ${w.protected_category
+            ? '<option value="noted">Note only — investigation continues</option>'
+            : '<option value="approved">Approve and close the case</option>'}
+          <option value="declined">Decline — the case continues</option>
+        </select></div>
+      <div class="field"><label for="decr">Reason for this decision <span class="req">*</span></label>
+        <textarea id="decr" placeholder="What you considered and why."></textarea></div>`, () => {
+      const reason = document.getElementById('decr').value.trim();
+      if (!reason) { toast('A reason is required for every decision.', 'alert'); return false; }
+      const res = Store.decideWithdrawal(w.id, me, document.getElementById('dec').value, reason);
+      if (!res.ok) { toast(res.error, 'alert'); return false; }
+      toast('Decision recorded.'); draw();
+    }, 'Record decision');
+  });
+}
+</script>
+</body>
+</html>

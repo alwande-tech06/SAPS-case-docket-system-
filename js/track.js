@@ -8,27 +8,46 @@ let current = null;
 const prefillRef = new URLSearchParams(location.search).get('ref');
 if (prefillRef) {
   document.getElementById('ref').value = prefillRef;
-  document.getElementById('surname').focus();
+  document.getElementById('fullname').focus();
 }
 
 document.getElementById('find').onclick = doLookup;
 document.getElementById('ref').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
-document.getElementById('surname').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
+document.getElementById('fullname').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
 
 function doLookup() {
   const ref = document.getElementById('ref').value.trim();
-  const surname = document.getElementById('surname').value.trim();
+  const fullname = document.getElementById('fullname').value.trim();
   const box = document.getElementById('lookupError');
 
-  if (!ref || !surname) {
-    box.innerHTML = '<div class="notice notice-alert"><strong>Both fields are needed</strong>Enter your reference number and the surname you reported under.</div>';
+  if (!ref || !fullname) {
+    box.innerHTML = '<div class="notice notice-alert"><strong>Both fields are needed</strong>Enter your reference number and your full name.</div>';
     return;
   }
 
-  const res = Store.track(ref, surname);
+  /* A complainant ID (CMP-…) or a 13-digit SA ID number both identify the
+     person rather than one report, so they list everything they have filed. */
+  const isIdNumber = /^\d{13}$/.test(ref.replace(/\D/g, '')) && !/[A-Za-z]/.test(ref);
+  if (/^CMP-/i.test(ref) || isIdNumber) {
+    const list = isIdNumber
+      ? Store.trackByIdNumber(ref, fullname)
+      : Store.trackByComplainantNumber(ref, fullname);
+    if (!list.ok) {
+      box.innerHTML = `<div class="notice notice-alert"><strong>No record found</strong>Check the
+        ${isIdNumber ? 'ID number' : 'complainant ID'} and full name and try again.</div>`;
+      document.getElementById('result').hidden = true;
+      return;
+    }
+    box.innerHTML = '';
+    current = null;
+    renderMulti(list, fullname);
+    return;
+  }
+
+  const res = Store.track(ref, fullname);
   if (!res.ok) {
     /* deliberately generic — never confirm which part was wrong */
-    box.innerHTML = '<div class="notice notice-alert"><strong>No report found</strong>Check the reference number and surname and try again.</div>';
+    box.innerHTML = '<div class="notice notice-alert"><strong>No report found</strong>Check the reference number and full name and try again.</div>';
     document.getElementById('result').hidden = true;
     return;
   }
@@ -36,6 +55,35 @@ function doLookup() {
   box.innerHTML = '';
   current = res;
   render(res);
+}
+
+function renderMulti(list, fullname) {
+  const host = document.getElementById('result');
+  host.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>Reports under ${esc(list.complainant.complainant_number)}</h2></div>
+      <p class="small muted">Select a report to see its full status.</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Reference</th><th>Type</th><th>Status</th><th>Reported</th><th></th></tr></thead>
+        <tbody>
+          ${list.reports.length ? list.reports.map(r => `
+            <tr>
+              <td class="ref">${esc(r.ref)}</td>
+              <td>${esc(r.category)}</td>
+              <td>${esc(r.status)}</td>
+              <td>${esc(fmtDate(r.created_at))}</td>
+              <td class="actions"><button class="btn btn-sm" data-view="${esc(r.ref)}">View</button></td>
+            </tr>`).join('') : emptyRow(5, 'No reports found under this ID.')}
+        </tbody>
+      </table></div>
+    </div>`;
+  host.hidden = false;
+
+  document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+    document.getElementById('ref').value = b.dataset.view;
+    document.getElementById('fullname').value = fullname;
+    doLookup();
+  });
 }
 
 function render(res) {
@@ -137,7 +185,9 @@ function render(res) {
         </div>
         <button class="btn btn-danger" id="escalate">Escalate to station commander</button>
       `}
-    </div>`;
+    </div>
+
+    ${renderWithdrawalCard(i)}`;
 
   host.hidden = false;
 
@@ -153,6 +203,52 @@ function render(res) {
       raised_by_complainant: true
     });
     toast('Escalation sent to the station commander.');
-    render(Store.track(ref, document.getElementById('surname').value.trim()));
+    render(Store.track(ref, document.getElementById('fullname').value.trim()));
   };
+
+  const wbtn = document.getElementById('requestWithdrawal');
+  if (wbtn) wbtn.onclick = () => {
+    const cat = document.getElementById('wCat').value;
+    if (!cat) { toast('Choose a reason so the request can be reviewed.', 'alert'); return; }
+    const detail = document.getElementById('wDetail').value.trim();
+    const outcome = Store.requestWithdrawal(i.id, { reason_category: cat, reason_detail: detail });
+    if (!outcome.ok) { toast(outcome.error, 'alert'); return; }
+    toast('Withdrawal request sent to the station commander.');
+    render(Store.track(ref, document.getElementById('fullname').value.trim()));
+  };
+}
+
+function renderWithdrawalCard(intake) {
+  const elig = Store.withdrawalEligibility(intake.id);
+  return `
+    <div class="card" style="margin-top:1rem">
+      <div class="card-head"><h3>Request to withdraw this case</h3></div>
+      ${!elig.allowed ? `<div class="notice${elig.pending ? '' : ' notice-alert'}">
+          <strong>${elig.pending ? 'Request already submitted' : 'This case cannot be withdrawn'}</strong>
+          ${esc(elig.reason)}
+        </div>` : `
+        ${elig.protectedCategory ? `<div class="notice notice-alert">
+          <strong>This request will be recorded, not automatically approved</strong>
+          For this type of case, the investigation can continue in the public interest even if you
+          ask to withdraw it. The station commander will note your request on the record.
+        </div>` : `<p class="small muted">The station commander decides on every withdrawal request —
+          the official or detective handling your case cannot approve it themselves.</p>`}
+        <div class="field">
+          <label for="wCat">Why are you asking to withdraw? <span class="req">*</span></label>
+          <select id="wCat">
+            <option value="">Select a reason</option>
+            <option>The matter has been resolved between the parties</option>
+            <option>I no longer wish to pursue this</option>
+            <option>I reported this in error</option>
+            <option>I am concerned about my safety if this continues</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="wDetail">Anything you want to add</label>
+          <textarea id="wDetail" style="min-height:80px"></textarea>
+        </div>
+        <button class="btn btn-danger" id="requestWithdrawal">Request withdrawal</button>
+      `}
+    </div>`;
 }

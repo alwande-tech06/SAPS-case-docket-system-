@@ -42,6 +42,7 @@ function detail(id) {
   const evidence = Store.evidence(id);
   const arrests = Store.arrests(id);
   const handovers = Store.handovers(id);
+  const submitted = Store.complainantEvidence(d.intake_id).filter(e => e.review_status === 'pending');
 
   document.getElementById('detail').innerHTML = `
     <div class="folder" data-tab="Working file">
@@ -51,7 +52,10 @@ function detail(id) {
           <p class="small muted" style="margin:0">${esc(Store.categoryName(d.category_id))} ·
             complainant ${esc(c ? c.name : '—')} · opened ${esc(fmtDate(d.registered_at))}</p>
         </div>
-        ${statusBadge(d.current_status)}
+        <div style="text-align:right">
+          ${statusBadge(d.current_status)} ${priorityBadge(d.priority)}
+          <div class="small muted" style="margin-top:.3rem">Priority set by crime category</div>
+        </div>
       </div>
 
       <div class="btn-row" style="margin-bottom:1.2rem">
@@ -62,6 +66,26 @@ function detail(id) {
         <button class="btn btn-sm btn-primary" id="handover">Hand to prosecutor</button>
       </div>
 
+      ${submitted.length ? `
+      <h3>Evidence submitted by the complainant</h3>
+      <div class="table-scroll" style="margin-bottom:1.2rem">
+        <table>
+          <thead><tr><th>File</th><th>Note</th><th>Submitted</th><th></th></tr></thead>
+          <tbody>
+            ${submitted.map(e => `
+              <tr>
+                <td>${fileChip(e)}</td>
+                <td class="small">${esc(e.description || '—')}</td>
+                <td>${esc(fmtDateTime(e.uploaded_at))}</td>
+                <td class="actions">
+                  <button class="btn btn-sm btn-primary" data-accept-ce="${e.id}">Accept as exhibit</button>
+                  <button class="btn btn-sm btn-danger" data-reject-ce="${e.id}">Reject</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+
       <div class="split">
         <div>
           <h3>Exhibits and chain of custody</h3>
@@ -69,14 +93,23 @@ function detail(id) {
             <table>
               <thead><tr><th>Exhibit</th><th>Description</th><th>Held by</th><th>Transfers</th><th></th></tr></thead>
               <tbody>
-                ${evidence.length ? evidence.map(e => `
+                ${evidence.length ? evidence.map(e => {
+                  const charge = e.linked_arrest_id ? arrests.find(a => a.id === e.linked_arrest_id) : null;
+                  return `
                   <tr>
                     <td class="ref">${esc(e.exhibit_number)}</td>
-                    <td>${esc(e.description)}<div class="small muted">${esc(e.evidence_type)}</div></td>
+                    <td>${e.image_data_url ? `<img class="exhibit-thumb attachment-preview" src="${e.image_data_url}" alt="${esc(e.description)}" title="Exhibit photograph — click to enlarge">` : ''}
+                      ${esc(e.description)}<div class="small muted">${esc(e.evidence_type)}</div>
+                      ${e.suspect_name ? `<div class="suspect-link">
+                        ${e.suspect_photo_data_url ? `<img class="exhibit-thumb attachment-preview" src="${e.suspect_photo_data_url}" alt="${esc(e.suspect_name)}" title="Suspect photograph — click to enlarge">` : ''}
+                        <div class="small"><strong>${esc(e.suspect_name)}</strong>
+                          <div class="ref muted">${esc(e.suspect_id_number)}</div>
+                          ${charge ? `<div class="muted">${esc(charge.charge_description)}</div>` : ''}
+                        </div></div>` : ''}</td>
                     <td>${esc(Store.userName(e.current_holder_id))}</td>
                     <td>${Store.custody(e.id).length}</td>
                     <td class="actions"><button class="btn btn-sm" data-transfer="${e.id}">Transfer</button></td>
-                  </tr>`).join('') : emptyRow(5, 'No exhibits registered.')}
+                  </tr>`; }).join('') : emptyRow(5, 'No exhibits registered.')}
               </tbody>
             </table>
           </div>
@@ -142,12 +175,60 @@ function detail(id) {
     <div class="field"><label for="et">Type</label>
       <select id="et"><option>Physical</option><option>Document</option><option>Digital</option><option>Photograph</option></select></div>
     <div class="field"><label for="es">Storage location</label>
-      <input type="text" id="es" placeholder="e.g. SAP13 store, shelf 4"></div>`, () => {
+      <input type="text" id="es" placeholder="e.g. SAP13 store, shelf 4"></div>
+    <div class="field"><label for="eimg">Photograph of the exhibit <span class="req">*</span></label>
+      <input type="file" id="eimg" accept="image/*,.pdf">
+      <p class="hint">For a document exhibit, a scanned copy through this same field satisfies the
+      requirement. An exhibit cannot be recorded without one.</p></div>
+
+    <h3 style="font-size:.95rem;margin-top:1.2rem">Link to a suspect</h3>
+    <p class="small muted">Optional — but if you fill in any of these, all three are required, so an
+    exhibit is never tied to a half-identified person.</p>
+    <div class="field"><label for="esn">Suspect's full name</label>
+      <input type="text" id="esn" placeholder="Name and surname"></div>
+    <div class="field"><label for="esid">Suspect's ID number</label>
+      <input type="text" id="esid" inputmode="numeric" maxlength="13" placeholder="13 digits"></div>
+    <div class="field"><label for="esimg">Photograph of the suspect</label>
+      <input type="file" id="esimg" accept="image/*"></div>
+    ${arrests.length ? `<div class="field"><label for="ech">Linked charge</label>
+      <select id="ech">
+        <option value="">Not linked to a recorded charge</option>
+        ${arrests.map(a => `<option value="${a.id}">${esc(a.accused_name)} — ${esc(a.charge_description)}</option>`).join('')}
+      </select></div>`
+      : `<p class="small muted">No arrest has been recorded on this case yet, so there is no charge to
+         link to. Record the arrest first if you need that link.</p>`}`, async () => {
     const desc = document.getElementById('ed').value.trim();
     if (!desc) { toast('Describe the exhibit before saving.', 'alert'); return false; }
-    Store.addEvidence(id, me, { description: desc,
+
+    const imgInput = document.getElementById('eimg');
+    if (!imgInput.files.length) {
+      toast('A photograph of the exhibit is required before it can be recorded.', 'alert'); return false;
+    }
+    const converted = await filesToAttachments(imgInput.files, { maxFiles: 1 });
+    if (!converted.ok) { toast(converted.error, 'alert'); return false; }
+
+    const suspectName = document.getElementById('esn').value.trim();
+    const suspectId = document.getElementById('esid').value.trim();
+    const suspectImgInput = document.getElementById('esimg');
+    let suspectPhoto = null;
+    if (suspectImgInput.files.length) {
+      const sConverted = await filesToAttachments(suspectImgInput.files, { maxFiles: 1 });
+      if (!sConverted.ok) { toast(sConverted.error, 'alert'); return false; }
+      suspectPhoto = sConverted.attachments[0].dataUrl;
+    }
+
+    const chargeSelect = document.getElementById('ech');
+    const res = Store.addEvidence(id, me, {
+      description: desc,
       evidence_type: document.getElementById('et').value,
-      storage_location: document.getElementById('es').value.trim() });
+      storage_location: document.getElementById('es').value.trim(),
+      image_data_url: converted.attachments[0].dataUrl,
+      suspect_name: suspectName,
+      suspect_id_number: suspectId,
+      suspect_photo_data_url: suspectPhoto,
+      linked_arrest_id: chargeSelect ? chargeSelect.value : null
+    });
+    if (!res.ok) { toast(res.error, 'alert'); return false; }
     toast('Exhibit registered and custody opened in your name.'); render();
   });
 
@@ -197,6 +278,24 @@ function detail(id) {
     Store.handover(id, me, { recipient_name: n,
       recipient_organisation: document.getElementById('ho').value, receipt_reference: r });
     toast('Handover recorded.'); render();
+  });
+
+  document.querySelectorAll('[data-accept-ce]').forEach(b => b.onclick = () => {
+    const res = Store.reviewComplainantEvidence(Number(b.dataset.acceptCe), me, 'accepted');
+    if (!res.ok) { toast(res.error, 'alert'); return; }
+    toast('Accepted as a formal exhibit.'); render();
+  });
+
+  document.querySelectorAll('[data-reject-ce]').forEach(b => b.onclick = () => {
+    openModal('Reject submitted evidence', `
+      <div class="field"><label for="rjn">Reason <span class="req">*</span></label>
+        <textarea id="rjn" placeholder="Why this cannot be accepted as an exhibit."></textarea></div>`, () => {
+      const note = document.getElementById('rjn').value.trim();
+      if (!note) { toast('A reason is required to reject submitted evidence.', 'alert'); return false; }
+      const res = Store.reviewComplainantEvidence(Number(b.dataset.rejectCe), me, 'rejected', note);
+      if (!res.ok) { toast(res.error, 'alert'); return false; }
+      toast('Rejected and recorded.'); render();
+    }, 'Reject');
   });
 
   document.querySelectorAll('[data-transfer]').forEach(b => b.onclick = () => {

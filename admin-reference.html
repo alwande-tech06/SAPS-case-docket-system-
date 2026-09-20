@@ -18,7 +18,8 @@
   <div class="split">
     <div class="folder" data-tab="Crime categories">
       <div class="table-scroll"><table>
-        <thead><tr><th>Category</th><th>Requires specialisation</th><th>Service level</th></tr></thead>
+        <thead><tr><th>Category</th><th>Requires specialisation</th><th>Service level</th>
+          <th>Default priority</th><th>Withdrawal</th></tr></thead>
         <tbody id="catBody"></tbody>
       </table></div>
     </div>
@@ -37,7 +38,9 @@ if (me) {
   document.getElementById('catBody').innerHTML = Store.categories().map(c => {
     const s = Store.specialisations().find(x => x.id === c.required_specialisation_id);
     return `<tr><td>${esc(c.name)}</td><td class="small">${esc(s ? s.name : '—')}</td>
-      <td>${c.sla_days} days</td></tr>`;
+      <td>${c.sla_days} days</td><td>${priorityBadge(c.default_priority)}</td>
+      <td class="small">${c.protected_from_withdrawal
+        ? '<span class="badge badge-alert">Cannot be auto-approved</span>' : 'Standard'}</td></tr>`;
   }).join('');
   document.getElementById('stBody').innerHTML = Store.stations().map(s =>
     `<div style="padding:.5rem 0;border-bottom:1px solid var(--border-soft)">

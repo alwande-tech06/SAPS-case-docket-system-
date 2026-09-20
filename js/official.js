@@ -6,7 +6,8 @@ if (me) { renderChrome('dashboard-official.html'); render(); }
 function render() {
   const all = Store.intakes({ station_id: me.station_id });
   const pending = all.filter(i => i.disposition === 'pending')
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    .sort((a, b) => priorityRank(Store.priorityFor(b.category_id)) - priorityRank(Store.priorityFor(a.category_id))
+      || new Date(a.created_at) - new Date(b.created_at));
   const overdue = pending.filter(i => ageHours(i.created_at) > 24);
 
   document.getElementById('tiles').innerHTML = `
@@ -25,6 +26,7 @@ function render() {
       <td class="ref">${esc(i.intake_number)}</td>
       <td>${esc(fmtDateTime(i.created_at))}</td>
       <td>${esc(Store.categoryName(i.category_id))}</td>
+      <td>${priorityBadge(Store.priorityFor(i.category_id))}</td>
       <td>${esc(c ? c.name : '—')}<div class="small muted">${esc(c ? c.contact : '')}</div></td>
       <td>${late ? `<span class="badge badge-alert">${esc(ageFrom(i.created_at))} overdue</span>`
                  : esc(ageFrom(i.created_at))}</td>
@@ -35,7 +37,7 @@ function render() {
         <button class="btn btn-sm" data-refer="${i.id}">Refer</button>
         <button class="btn btn-sm" data-view="${i.id}">Details</button>
       </td></tr>`;
-  }).join('') : emptyRow(7, 'No reports are waiting. New reports appear here as soon as they are submitted.');
+  }).join('') : emptyRow(8, 'No reports are waiting. New reports appear here as soon as they are submitted.');
 
   const disposed = all.filter(i => i.disposition !== 'pending')
     .sort((a, b) => new Date(b.disposed_at) - new Date(a.disposed_at)).slice(0, 8);
@@ -136,16 +138,29 @@ function wire() {
   document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
     const i = Store.intakes().find(x => x.id === Number(b.dataset.view));
     const c = Store.complainant(i.complainant_id);
+    const attachments = Store.complainantEvidence(i.id);
     openModal('Report details', `
       ${stampBlock('Report reference', i.intake_number, 'Pending')}
       <table style="margin-top:1rem">
-        <tr><th>Complainant</th><td>${esc(c ? c.name : '—')}</td></tr>
+        <tr><th>Complainant</th><td>${esc(c ? c.name : '—')} <span class="small muted">${esc(c ? c.complainant_number : '')}</span></td></tr>
+        <tr><th>ID number</th><td class="ref">${esc(c && c.id_number ? c.id_number : '—')}</td></tr>
+        <tr><th>Age</th><td>${(() => {
+          const yrs = c && c.id_number ? ageFromSaId(c.id_number) : null;
+          if (yrs === null) return '—';
+          return yrs < 18
+            ? `<span class="badge badge-alert">${yrs} — minor</span>`
+            : esc(String(yrs));
+        })()}</td></tr>
+        <tr><th>Gender</th><td>${esc(c && c.gender ? c.gender : '—')}</td></tr>
         <tr><th>Contact</th><td>${esc(c ? c.contact : '—')}</td></tr>
-        <tr><th>Category</th><td>${esc(Store.categoryName(i.category_id))}</td></tr>
+        <tr><th>Category</th><td>${esc(Store.categoryName(i.category_id))} · ${priorityBadge(Store.priorityFor(i.category_id))}</td></tr>
         <tr><th>Incident date</th><td>${esc(fmtDateTime(i.incident_datetime))}</td></tr>
         <tr><th>Location</th><td>${esc(i.incident_location)}</td></tr>
         <tr><th>Channel</th><td>${esc(labelChannel(i.channel))}</td></tr>
         <tr><th>Description</th><td>${esc(i.incident_description)}</td></tr>
-      </table>`, () => {}, 'Close');
+      </table>
+      <h3 style="margin-top:1.1rem">Evidence submitted by the complainant</h3>
+      ${attachments.length ? `<div class="attachment-row">${attachments.map(a => fileChip(a)).join('')}</div>`
+        : '<p class="small muted">Nothing submitted yet.</p>'}`, () => {}, 'Close');
   });
 }

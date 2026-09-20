@@ -41,6 +41,11 @@ function newCasNumber(db, stationCode) {
   return `CAS-2026-${stationCode}-${pad(db.counters.cas)}`;
 }
 
+function newComplainantNumber(db) {
+  db.counters.complainant += 1;
+  return `CMP-${pad(db.counters.complainant)}`;
+}
+
 /* ---------------- audit trail ----------------
    Hash-chained. Each entry stores a short hash of its own content plus the
    previous entry's hash, so removing an entry breaks the chain visibly.
@@ -134,14 +139,24 @@ const Store = {
   /* ----- reporting (public, no account) ----- */
   submitReport(data) {
     const db = read();
-    const station = db.stations.find(s => s.id === Number(data.station_id)) || db.stations[0];
+    const station = data.station_id
+      ? (db.stations.find(s => s.id === Number(data.station_id)) || db.stations[0])
+      : routeByLocation(db, data.location);
 
-    let comp = db.complainants.find(c => c.contact === data.contact);
+    let comp = data.id_number
+      ? db.complainants.find(c => c.id_number === data.id_number)
+      : db.complainants.find(c => c.contact === data.contact);
     if (!comp) {
-      comp = { id: nextId(db.complainants), name: data.name, contact: data.contact,
+      comp = { id: nextId(db.complainants), complainant_number: newComplainantNumber(db),
+               name: data.name, contact: data.contact, id_number: data.id_number || null,
+               gender: data.gender || null,
                verified_at: new Date().toISOString() };
       db.complainants.push(comp);
-    } else { comp.name = data.name; }
+    } else {
+      comp.name = data.name;
+      comp.contact = data.contact;
+      if (data.gender) comp.gender = data.gender;
+    }
 
     const rec = {
       id: nextId(db.intakes),
@@ -184,7 +199,7 @@ const Store = {
   },
 
   /* ----- tracking ----- */
-  track(reference, surname) {
+  track(reference, fullName) {
     const db = read();
     const ref = String(reference).toUpperCase().trim();
     let intake = db.intakes.find(i => i.intake_number.toUpperCase() === ref);
@@ -193,8 +208,8 @@ const Store = {
     if (!intake) return { ok: false };
 
     const comp = db.complainants.find(c => c.id === intake.complainant_id);
-    const surnameOk = !surname || (comp && comp.name.toLowerCase().includes(String(surname).toLowerCase().trim()));
-    if (!surnameOk) return { ok: false };
+    const nameOk = !fullName || (comp && normalizeName(comp.name) === normalizeName(fullName));
+    if (!nameOk) return { ok: false };
 
     if (!docket) docket = db.dockets.find(d => d.intake_id === intake.id);
     const refusal = db.refusals.find(r => r.intake_id === intake.id);
@@ -210,12 +225,26 @@ const Store = {
     return { ok: true, intake, docket, refusal, history, escalations, complainant: comp };
   },
 
+  trackByComplainantNumber(number, fullName) {
+    const db = read();
+    const num = String(number).toUpperCase().trim();
+    return complainantReports(db,
+      db.complainants.find(c => (c.complainant_number || '').toUpperCase() === num), fullName);
+  },
+
+  trackByIdNumber(idNumber, fullName) {
+    const db = read();
+    const id = String(idNumber).replace(/\D/g, '');
+    return complainantReports(db, db.complainants.find(c => c.id_number === id), fullName);
+  },
+
   /* ----- disposition (police official) ----- */
   openDocket(intakeId, actor) {
     const db = read();
     const intake = db.intakes.find(i => i.id === intakeId);
     if (!intake || intake.disposition !== 'pending') return null;
     const station = db.stations.find(s => s.id === intake.station_id);
+    const cat = db.categories.find(c => c.id === intake.category_id);
 
     const docket = {
       id: nextId(db.dockets),
@@ -229,7 +258,8 @@ const Store = {
       registered_at: new Date().toISOString(),
       last_activity_at: new Date().toISOString(),
       detective_id: null,
-      closure_type: null
+      closure_type: null,
+      priority: cat ? cat.default_priority : 'Medium'
     };
     db.dockets.push(docket);
 
@@ -244,7 +274,7 @@ const Store = {
 
     logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
       action_type: 'create', entity_type: 'docket', entity_id: docket.id, case_id: docket.id,
-      description: `Docket opened from ${intake.intake_number}, ${docket.cas_number} issued` });
+      description: `Docket opened from ${intake.intake_number}, ${docket.cas_number} issued — priority ${docket.priority} (auto by category)` });
 
     // FR14 — auto-assign by crime category and lowest caseload
     const assigned = autoAssign(db, docket);
@@ -357,25 +387,43 @@ const Store = {
   notes(docketId) { return read().notes.filter(n => n.docket_id === Number(docketId)); },
   statusHistory(docketId) { return read().status_history.filter(h => h.docket_id === Number(docketId)); },
 
-  /* ----- evidence ----- */
+  /* ----- evidence -----
+     An image is mandatory: a photograph of the item, or for a document exhibit a
+     scanned copy through the same field. "Storage location" alone was never
+     evidence that the item exists. The suspect link is optional, but once it is
+     started all of it — name, ID number and photograph — is required together,
+     because a half-identified suspect serves no purpose. */
   addEvidence(docketId, actor, payload) {
     const db = read();
     const d = db.dockets.find(x => x.id === Number(docketId));
-    const ev = { id: nextId(db.evidence), docket_id: d.id,
-      exhibit_number: `EX-${d.cas_number.slice(-6)}-${pad(db.evidence.filter(e => e.docket_id === d.id).length + 1).slice(-3)}`,
-      description: payload.description, evidence_type: payload.evidence_type,
-      collected_by: actor.id, collected_at: new Date().toISOString(),
-      current_holder_id: actor.id, storage_location: payload.storage_location };
-    db.evidence.push(ev);
-    db.custody.push({ id: nextId(db.custody), evidence_id: ev.id, from_user_id: null,
-      to_user_id: actor.id, transferred_at: ev.collected_at,
-      purpose: 'Initial collection', acknowledged: true });
-    d.last_activity_at = ev.collected_at;
+    if (!d) return { ok: false, error: 'Case not found.' };
+    if (!payload.description || !payload.description.trim()) {
+      return { ok: false, error: 'Describe the exhibit before it can be recorded.' };
+    }
+    if (!payload.image_data_url) {
+      return { ok: false, error: 'A photograph of the exhibit (or a scanned copy, for a document) is required before it can be recorded.' };
+    }
+
+    const suspectFields = [payload.suspect_name, payload.suspect_id_number, payload.suspect_photo_data_url];
+    if (suspectFields.some(f => f) && !suspectFields.every(f => f)) {
+      return { ok: false, error: 'To link a suspect, their name, ID number and photograph are all required.' };
+    }
+    if (payload.suspect_id_number && !/^\d{13}$/.test(payload.suspect_id_number)) {
+      return { ok: false, error: "The suspect's ID number must be 13 digits." };
+    }
+    if (payload.linked_arrest_id &&
+        !db.arrests.some(a => a.id === Number(payload.linked_arrest_id) && a.docket_id === d.id)) {
+      return { ok: false, error: 'The charge you linked does not belong to this case.' };
+    }
+
+    const ev = createExhibit(db, d, actor, payload);
     logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
       action_type: 'create', entity_type: 'evidence', entity_id: ev.id, case_id: d.id,
-      description: `Exhibit ${ev.exhibit_number} registered on ${d.cas_number}` });
+      description: ev.suspect_name
+        ? `Exhibit ${ev.exhibit_number} registered on ${d.cas_number}, linked to suspect ${ev.suspect_name} (${ev.suspect_id_number})`
+        : `Exhibit ${ev.exhibit_number} registered on ${d.cas_number}` });
     write(db);
-    return ev;
+    return { ok: true, evidence: ev };
   },
 
   transferEvidence(evidenceId, actor, toUserId, purpose) {
@@ -397,6 +445,173 @@ const Store = {
 
   evidence(docketId) { return read().evidence.filter(e => e.docket_id === Number(docketId)); },
   custody(evidenceId) { return read().custody.filter(c => c.evidence_id === Number(evidenceId)); },
+
+  /* ----- priority classification -----
+     Priority is derived from the crime category, never chosen by hand: murder
+     and shoplifting cannot be made to weigh the same by whoever happens to be
+     capturing the case. The mapping lives on the category (admin reference
+     data), so changing it is a policy change, not a per-case decision. */
+  priorityFor(categoryId) {
+    const db = read();
+    const cat = db.categories.find(c => c.id === Number(categoryId));
+    return cat ? cat.default_priority : 'Medium';
+  },
+
+  /* ----- evidence submitted directly by the complainant ----- */
+  addComplainantEvidence(intakeId, files, description) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake || !files || !files.length) return [];
+    const created = files.map(f => {
+      const rec = { id: nextId(db.complainant_evidence), intake_id: intake.id,
+        file_name: f.name, file_type: f.type, file_size: f.size, data_url: f.dataUrl,
+        description: description || '', uploaded_at: new Date().toISOString(),
+        review_status: 'pending', reviewed_by: null, reviewed_at: null,
+        review_note: '', linked_exhibit_id: null };
+      db.complainant_evidence.push(rec);
+      return rec;
+    });
+    const docket = intake.docket_id ? db.dockets.find(d => d.id === intake.docket_id) : null;
+    if (docket) docket.last_activity_at = new Date().toISOString();
+    logAudit(db, { action_type: 'evidence_submitted', entity_type: 'intake', entity_id: intake.id,
+      case_id: docket ? docket.id : null,
+      description: `Complainant submitted ${created.length} file(s) as evidence on ${intake.intake_number}` });
+    write(db);
+    return created;
+  },
+
+  complainantEvidence(intakeId) {
+    return read().complainant_evidence.filter(e => e.intake_id === Number(intakeId));
+  },
+
+  reviewComplainantEvidence(id, actor, decision, note) {
+    const db = read();
+    const ce = db.complainant_evidence.find(e => e.id === Number(id));
+    if (!ce) return null;
+    if (decision === 'rejected' && !(note || '').trim()) {
+      return { ok: false, error: 'A reason is required to reject submitted evidence.' };
+    }
+    const intake = db.intakes.find(i => i.id === ce.intake_id);
+    const docket = intake && intake.docket_id ? db.dockets.find(d => d.id === intake.docket_id) : null;
+    ce.review_status = decision;
+    ce.reviewed_by = actor.id;
+    ce.reviewed_at = new Date().toISOString();
+    ce.review_note = (note || '').trim();
+
+    if (decision === 'accepted' && docket) {
+      const ev = createExhibit(db, docket, actor, {
+        description: ce.description || ce.file_name,
+        evidence_type: ce.file_type.startsWith('image/') ? 'Photograph' : 'Document',
+        storage_location: 'Submitted by complainant',
+        image_data_url: ce.data_url,
+        custody_purpose: 'Accepted from complainant submission'
+      });
+      ce.linked_exhibit_id = ev.id;
+    }
+
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: decision === 'accepted' ? 'evidence_accepted' : 'evidence_rejected',
+      entity_type: 'complainant_evidence', entity_id: ce.id, case_id: docket ? docket.id : null,
+      description: decision === 'accepted'
+        ? `Complainant-submitted file "${ce.file_name}" accepted as an exhibit`
+        : `Complainant-submitted file "${ce.file_name}" rejected — ${ce.review_note}` });
+    write(db);
+    return { ok: true, evidence: ce };
+  },
+
+  /* ----- withdrawal requests ----- */
+  withdrawalEligibility(intakeId) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake) return { allowed: false, reason: 'Report not found.' };
+    const cat = db.categories.find(c => c.id === intake.category_id);
+    const protectedCategory = !!(cat && cat.protected_from_withdrawal);
+    const docket = intake.docket_id ? db.dockets.find(d => d.id === intake.docket_id) : null;
+
+    const pending = db.withdrawals.find(w => w.intake_id === intake.id && w.status === 'pending');
+    if (pending) return { allowed: false, pending: true, protectedCategory,
+      reason: 'A withdrawal request for this case is already awaiting a decision.' };
+
+    if (docket) {
+      if (docket.current_status === 'closed') {
+        return { allowed: false, protectedCategory, reason: 'This case is already closed.' };
+      }
+      if (docket.current_status === 'sent_to_prosecutor') {
+        return { allowed: false, protectedCategory, reason: 'This case has already been handed to the prosecutor and can no longer be withdrawn.' };
+      }
+      if (db.arrests.some(a => a.docket_id === docket.id)) {
+        return { allowed: false, protectedCategory, reason: 'An arrest has already been made on this case, so it can no longer be withdrawn.' };
+      }
+    } else if (intake.disposition !== 'pending') {
+      return { allowed: false, protectedCategory, reason: 'This report has already been disposed of.' };
+    }
+
+    return { allowed: true, protectedCategory };
+  },
+
+  requestWithdrawal(intakeId, payload) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake) return { ok: false, error: 'Report not found.' };
+    const elig = Store.withdrawalEligibility(intakeId);
+    if (!elig.allowed) return { ok: false, error: elig.reason };
+
+    const rec = { id: nextId(db.withdrawals), intake_id: intake.id,
+      docket_id: intake.docket_id || null,
+      reason_category: payload.reason_category, reason_detail: payload.reason_detail,
+      requested_at: new Date().toISOString(), protected_category: elig.protectedCategory,
+      status: 'pending', decision: null, decided_by: null, decided_at: null, decision_reason: null };
+    db.withdrawals.push(rec);
+    logAudit(db, { action_type: 'withdrawal_request', entity_type: 'intake', entity_id: intake.id,
+      case_id: intake.docket_id || null,
+      description: `Complainant requested withdrawal of ${intake.intake_number} — ${payload.reason_category}` });
+    write(db);
+    return { ok: true, withdrawal: rec };
+  },
+
+  decideWithdrawal(id, actor, decision, reason) {
+    const db = read();
+    const w = db.withdrawals.find(x => x.id === Number(id));
+    if (!w) return { ok: false, error: 'Withdrawal request not found.' };
+    if (!reason || !reason.trim()) return { ok: false, error: 'A reason is required for this decision.' };
+    const intake = db.intakes.find(i => i.id === w.intake_id);
+    const docket = w.docket_id ? db.dockets.find(d => d.id === w.docket_id) : null;
+
+    w.status = 'decided';
+    w.decision = decision;
+    w.decided_by = actor.id;
+    w.decided_at = new Date().toISOString();
+    w.decision_reason = reason.trim();
+
+    if (decision === 'approved') {
+      if (docket) {
+        const prevStatus = docket.current_status;
+        docket.current_status = 'closed';
+        docket.closure_type = 'Withdrawn by complainant';
+        docket.last_activity_at = w.decided_at;
+        db.status_history.push({ id: nextId(db.status_history), docket_id: docket.id,
+          previous_status: prevStatus, new_status: 'closed', changed_by: actor.id,
+          changed_at: w.decided_at, notes: `Withdrawn by complainant — ${reason.trim()}` });
+      } else if (intake) {
+        intake.disposition = 'withdrawn';
+        intake.disposed_at = w.decided_at;
+        intake.disposed_by = actor.id;
+      }
+    }
+
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'withdrawal_decision', entity_type: 'withdrawal', entity_id: w.id,
+      case_id: docket ? docket.id : null,
+      description: `Withdrawal request on ${intake ? intake.intake_number : '—'} — ${decision}: ${reason.trim()}` });
+    write(db);
+    return { ok: true, withdrawal: w };
+  },
+
+  withdrawals(filter = {}) {
+    const db = read();
+    return db.withdrawals.filter(w => !filter.status || w.status === filter.status)
+      .slice().reverse();
+  },
 
   /* ----- arrests / handover ----- */
   addArrest(docketId, actor, payload) {
@@ -599,12 +814,77 @@ const Store = {
     return db.refusals.filter(r => !stationId || r.station_id === stationId);
   },
 
+  notifications(intakeId) {
+    return read().notifications.filter(n => n.intake_id === Number(intakeId))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  },
+
   /* helper lookups */
   userName(id) { const u = read().users.find(x => x.id === Number(id)); return u ? u.name : 'System'; },
   categoryName(id) { const c = read().categories.find(x => x.id === Number(id)); return c ? c.name : '—'; },
   stationName(id) { const s = read().stations.find(x => x.id === Number(id)); return s ? s.name : '—'; },
   complainant(id) { return read().complainants.find(c => c.id === Number(id)); }
 };
+
+/* ---------------- routing by incident location ----------------
+   No mapping/geocoding service is wired up (this is a client-only prototype),
+   so each station lists the suburbs/areas it covers and the incident location
+   text is matched against them. Falls back to the first station if nothing
+   matches, mirroring how a real intake desk would escalate an unclear address. */
+function routeByLocation(db, locationText) {
+  const text = String(locationText || '').toLowerCase();
+  const match = db.stations.find(s => (s.service_areas || []).some(area => text.includes(area)));
+  return match || db.stations[0];
+}
+
+/* Case-sensitive on purpose: the name given when tracking must match the one
+   captured on the report exactly, capitals included. Only whitespace is
+   normalised, because trailing spaces and double spaces are invisible on screen
+   and a complainant could never see what to correct. */
+function normalizeName(s) {
+  return String(s || '').trim().replace(/\s+/g, ' ');
+}
+
+/* Shared by the complainant-ID and ID-number lookups: same name check, same
+   list of that person's reports, so the two routes can never drift apart. */
+function complainantReports(db, comp, fullName) {
+  if (!comp) return { ok: false };
+  if (fullName && normalizeName(comp.name) !== normalizeName(fullName)) return { ok: false };
+
+  const reports = db.intakes.filter(i => i.complainant_id === comp.id).map(i => {
+    const docket = i.docket_id ? db.dockets.find(d => d.id === i.docket_id) : null;
+    return {
+      ref: docket ? docket.cas_number : i.intake_number,
+      category: (db.categories.find(c => c.id === i.category_id) || {}).name || '—',
+      status: docket ? labelStatus(docket.current_status) : labelDisposition(i.disposition),
+      created_at: i.created_at
+    };
+  }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  return { ok: true, complainant: comp, reports };
+}
+
+/* ---------------- shared exhibit creation ----------------
+   Used by both direct registration and accepted complainant submissions, so the
+   mandatory-image rule cannot drift between the two entry points. */
+function createExhibit(db, docket, actor, payload) {
+  const ev = { id: nextId(db.evidence), docket_id: docket.id,
+    exhibit_number: `EX-${docket.cas_number.slice(-6)}-${pad(db.evidence.filter(e => e.docket_id === docket.id).length + 1).slice(-3)}`,
+    description: payload.description, evidence_type: payload.evidence_type,
+    collected_by: actor.id, collected_at: new Date().toISOString(),
+    current_holder_id: actor.id, storage_location: payload.storage_location || '',
+    image_data_url: payload.image_data_url,
+    suspect_name: payload.suspect_name || null,
+    suspect_id_number: payload.suspect_id_number || null,
+    suspect_photo_data_url: payload.suspect_photo_data_url || null,
+    linked_arrest_id: payload.linked_arrest_id ? Number(payload.linked_arrest_id) : null };
+  db.evidence.push(ev);
+  db.custody.push({ id: nextId(db.custody), evidence_id: ev.id, from_user_id: null,
+    to_user_id: actor.id, transferred_at: ev.collected_at,
+    purpose: payload.custody_purpose || 'Initial collection', acknowledged: true });
+  docket.last_activity_at = ev.collected_at;
+  return ev;
+}
 
 /* ---------------- auto-assignment (FR14–FR16, FR18) ---------------- */
 
@@ -675,8 +955,14 @@ function labelChannel(c) {
 function labelDisposition(d) {
   return ({
     pending: 'Pending', docket_opened: 'Docket opened',
-    refused: 'Refused', referred: 'Referred'
+    refused: 'Refused', referred: 'Referred', withdrawn: 'Withdrawn'
   })[d] || d;
+}
+
+function labelPriority(p) { return p || 'Medium'; }
+
+function priorityRank(p) {
+  return ({ Low: 1, Medium: 2, High: 3, Critical: 4 })[p] || 2;
 }
 
 /* ==========================================================================
@@ -689,11 +975,15 @@ function seed() {
   const iso = ms => new Date(ms).toISOString();
 
   const db = {
-    counters: { intake: 0, cas: 0 },
+    counters: { intake: 0, cas: 0, complainant: 0 },
     stations: [
-      { id: 1, name: 'Durban Central SAPS', code: 'DBN', province: 'KwaZulu-Natal' },
-      { id: 2, name: 'Umlazi SAPS', code: 'UML', province: 'KwaZulu-Natal' },
-      { id: 3, name: 'Pinetown SAPS', code: 'PTN', province: 'KwaZulu-Natal' }
+      { id: 1, name: 'Durban Central SAPS', code: 'DBN', province: 'KwaZulu-Natal',
+        service_areas: ['durban central', 'smith street', 'glenwood', 'berea', 'overport',
+          'morningside', 'umbilo', 'point', 'city centre', 'anton lembede'] },
+      { id: 2, name: 'Umlazi SAPS', code: 'UML', province: 'KwaZulu-Natal',
+        service_areas: ['umlazi'] },
+      { id: 3, name: 'Pinetown SAPS', code: 'PTN', province: 'KwaZulu-Natal',
+        service_areas: ['pinetown', 'westville', 'kloof', 'new germany'] }
     ],
     specialisations: [
       { id: 1, name: 'General Detective' },
@@ -702,14 +992,14 @@ function seed() {
       { id: 4, name: 'Vehicle Crime' }
     ],
     categories: [
-      { id: 1, name: 'Theft', required_specialisation_id: 1, sla_days: 30 },
-      { id: 2, name: 'Common assault', required_specialisation_id: 1, sla_days: 30 },
-      { id: 3, name: 'Sexual offence', required_specialisation_id: 2, sla_days: 14 },
-      { id: 4, name: 'Domestic violence', required_specialisation_id: 2, sla_days: 14 },
-      { id: 5, name: 'Fraud', required_specialisation_id: 3, sla_days: 45 },
-      { id: 6, name: 'Vehicle theft', required_specialisation_id: 4, sla_days: 30 },
-      { id: 7, name: 'Burglary', required_specialisation_id: 1, sla_days: 30 },
-      { id: 8, name: 'Malicious damage to property', required_specialisation_id: 1, sla_days: 30 }
+      { id: 1, name: 'Theft', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+      { id: 2, name: 'Common assault', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+      { id: 3, name: 'Sexual offence', required_specialisation_id: 2, sla_days: 14, default_priority: 'Critical', protected_from_withdrawal: true },
+      { id: 4, name: 'Domestic violence', required_specialisation_id: 2, sla_days: 14, default_priority: 'High', protected_from_withdrawal: true },
+      { id: 5, name: 'Fraud', required_specialisation_id: 3, sla_days: 45, default_priority: 'Medium', protected_from_withdrawal: false },
+      { id: 6, name: 'Vehicle theft', required_specialisation_id: 4, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+      { id: 7, name: 'Burglary', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+      { id: 8, name: 'Malicious damage to property', required_specialisation_id: 1, sla_days: 30, default_priority: 'Low', protected_from_withdrawal: false }
     ],
     users: [
       { id: 1, name: 'Sgt. M. Dlamini', email: 'official@saps.demo', password: 'demo1234',
@@ -736,37 +1026,45 @@ function seed() {
     ],
     complainants: [], intakes: [], dockets: [], refusals: [], escalations: [],
     assignments: [], status_history: [], notes: [], evidence: [], custody: [],
-    arrests: [], handovers: [], audit_log: []
+    arrests: [], handovers: [], audit_log: [], complainant_evidence: [], withdrawals: []
   };
 
   /* --- seeded reports --- */
   const seeds = [
-    { name: 'Thandeka Ngcobo', contact: '+27 82 555 0141', cat: 1, station: 1, channel: 'public_web',
+    { name: 'Thandeka Ngcobo', contact: '+27 82 555 0141', gender: 'Female', id_number: '8804120832087',
+      cat: 1, station: 1, channel: 'public_web',
       loc: '14 Smith Street, Durban Central', desc: 'Handbag taken from a parked vehicle overnight.',
       age: 6, action: 'docket' },
-    { name: 'Sipho Mabaso', contact: '+27 83 555 0192', cat: 7, station: 1, channel: 'public_web',
+    { name: 'Sipho Mabaso', contact: '+27 83 555 0192', gender: 'Male', id_number: '7905235190876',
+      cat: 7, station: 1, channel: 'public_web',
       loc: '8 Broad Street, Glenwood', desc: 'Forced entry through a back window, television removed.',
       age: 40, action: 'docket_stale' },
-    { name: 'Lerato Khoza', contact: '+27 71 555 0163', cat: 6, station: 1, channel: 'station',
+    { name: 'Lerato Khoza', contact: '+27 71 555 0163', gender: 'Female', id_number: '9207140481083',
+      cat: 6, station: 1, channel: 'station',
       loc: 'Parking garage, Anton Lembede Street', desc: 'Vehicle removed from a secured parking bay.',
       age: 12, action: 'docket' },
-    { name: 'Bongani Zwane', contact: '+27 84 555 0128', cat: 2, station: 1, channel: 'assisted',
+    { name: 'Bongani Zwane', contact: '+27 84 555 0128', gender: 'Male', id_number: '8511095732081',
+      cat: 2, station: 1, channel: 'assisted',
       loc: 'Berea Road taxi rank', desc: 'Assaulted by two men following a dispute over a fare.',
       age: 30, action: 'refused' },
-    { name: 'Nomsa Cele', contact: '+27 72 555 0175', cat: 3, station: 1, channel: 'public_web',
+    { name: 'Nomsa Cele', contact: '+27 72 555 0175', gender: 'Female', id_number: '9001010923086',
+      cat: 3, station: 1, channel: 'public_web',
       loc: 'Residential address, Overport', desc: 'Reported for assessment by FCS unit.',
       age: 54, action: 'pending' },
-    { name: 'Ayanda Mkhize', contact: '+27 76 555 0119', cat: 5, station: 1, channel: 'public_web',
+    { name: 'Ayanda Mkhize', contact: '+27 76 555 0119', gender: 'Female', id_number: '9503220614087',
+      cat: 5, station: 1, channel: 'public_web',
       loc: 'Online transaction, Durban', desc: 'Funds transferred to a fraudulent account.',
       age: 3, action: 'pending' },
-    { name: 'Precious Dube', contact: '+27 79 555 0187', cat: 8, station: 1, channel: 'third_party',
+    { name: 'Precious Dube', contact: '+27 79 555 0187', gender: 'Female', id_number: '8207300257086',
+      cat: 8, station: 1, channel: 'third_party',
       loc: 'School premises, Chatsworth', desc: 'Reported by school principal on behalf of the school.',
       age: 20, action: 'referred' }
   ];
 
   seeds.forEach(s => {
     const station = db.stations.find(x => x.id === s.station);
-    const comp = { id: nextId(db.complainants), name: s.name, contact: s.contact,
+    const comp = { id: nextId(db.complainants), complainant_number: newComplainantNumber(db),
+                   name: s.name, contact: s.contact, gender: s.gender, id_number: s.id_number,
                    verified_at: iso(now - s.age * 36e5) };
     db.complainants.push(comp);
 
@@ -801,7 +1099,8 @@ function seed() {
         current_status: s.action === 'docket_stale' ? 'under_investigation' : 'registered',
         registered_at: openedAt,
         last_activity_at: s.action === 'docket_stale' ? iso(now - 38 * 864e5) : openedAt,
-        detective_id: null, closure_type: null
+        detective_id: null, closure_type: null,
+        priority: (db.categories.find(c => c.id === s.cat) || {}).default_priority || 'Medium'
       };
       db.dockets.push(docket);
       intake.disposition = 'docket_opened';
