@@ -36,8 +36,42 @@ if (me) {
       <td>${esc(fmtDate(d.registered_at))}</td>
       <td>${late ? `<span class="badge badge-alert">${esc(ageFrom(d.last_activity_at))} ago</span>` : esc(fmtDate(d.last_activity_at))}</td>
       <td>${statusBadge(d.current_status)}</td>
-      <td class="actions"><button class="btn btn-sm" data-trail="${d.id}">View audit trail</button></td></tr>`;
+      <td class="actions">
+        <button class="btn btn-sm" data-trail="${d.id}">View audit trail</button>
+        ${d.current_status === 'closed' ? '' : `<button class="btn btn-sm btn-primary" data-instruct="${d.id}">Inspect &amp; instruct</button>`}
+      </td></tr>`;
   }).join('') : emptyRow(8, 'No cases registered yet.');
+
+  /* NI 3/2011 - the commander inspects dockets personally and writes his
+     instructions in the investigation diary. Those instructions are what he
+     checks again when a closure comes to him for approval. */
+  document.querySelectorAll('[data-instruct]').forEach(b => b.onclick = () => {
+    const d = Store.docket(Number(b.dataset.instruct));
+    const open = Store.instructions(d.id);
+    openModal(`Inspect ${d.cas_number} and write an instruction`, `
+      <p class="small muted">Detective: ${esc(d.detective_id ? Store.userName(d.detective_id) : 'unassigned')} ·
+      ${Store.notes(d.id).filter(n => n.note_type !== 'instruction').length} diary entr(ies) ·
+      ${Store.evidence(d.id).length} exhibit(s) ·
+      ${Store.witnesses(d.id).length} witness(es) ·
+      ${Store.forensics(d.id).length} forensic submission(s)</p>
+      ${open.length ? `<h3 style="font-size:.9rem">Instructions already on this docket</h3>
+        <ul class="timeline" style="margin-bottom:1rem">${open.map(n => `<li>
+          <div class="when">${n.status === 'open' ? '<span class="badge badge-alert">Open</span>'
+            : `<span class="badge badge-good">${esc(n.status)}</span>`}</div>
+          ${esc(n.note_text)}${n.response ? `<div class="small muted">${esc(n.response)}</div>` : ''}
+        </li>`).join('')}</ul>` : ''}
+      <div class="field">
+        <label for="instr">Instruction <span class="req">*</span></label>
+        <textarea id="instr" placeholder="What the investigating officer must do, and by when."></textarea>
+        <p class="hint">This is checked again at closure. An instruction left open blocks the docket
+        from being filed until it is carried out or explained.</p>
+      </div>`, () => {
+      const res = Store.addInstruction(d.id, me, document.getElementById('instr').value);
+      if (!res.ok) { toast(res.error, 'alert'); return false; }
+      toast('Instruction written to the investigation diary.');
+      location.reload();
+    }, 'Write instruction');
+  });
 
   document.querySelectorAll('[data-trail]').forEach(b => b.onclick = () => {
     const d = Store.docket(Number(b.dataset.trail));

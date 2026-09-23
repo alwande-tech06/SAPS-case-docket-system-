@@ -12,16 +12,357 @@
 const DB_KEY = 'saps_docket_db_v1';
 const SESSION_KEY = 'saps_docket_session';
 
+/* Crime categories live outside seed() because migrate() backfills them onto a
+   database that was seeded before these columns existed. */
+const CATEGORIES = [
+  { id: 1, name: 'Theft', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+  { id: 2, name: 'Common assault', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+  { id: 3, name: 'Sexual offence', required_specialisation_id: 2, sla_days: 14, default_priority: 'Critical', protected_from_withdrawal: true },
+  { id: 4, name: 'Domestic violence', required_specialisation_id: 2, sla_days: 14, default_priority: 'High', protected_from_withdrawal: true },
+  { id: 5, name: 'Fraud', required_specialisation_id: 3, sla_days: 45, default_priority: 'Medium', protected_from_withdrawal: false },
+  { id: 6, name: 'Vehicle theft', required_specialisation_id: 4, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+  { id: 7, name: 'Burglary', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+  { id: 8, name: 'Malicious damage to property', required_specialisation_id: 1, sla_days: 30, default_priority: 'Low', protected_from_withdrawal: false },
+  /* Robbery is theft with violence or a threat of it — a different crime from
+     theft, with different elements, so it cannot sit under the same heading. */
+  { id: 9, name: 'Robbery', required_specialisation_id: 1, sla_days: 30, default_priority: 'High', protected_from_withdrawal: false },
+  { id: 10, name: 'Crimen injuria or intimidation', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
+  /* "Other" deliberately does not guess. It takes a free description and an
+     official classifies it when the docket is opened, because a wrong
+     automatic category sets the wrong priority and the wrong specialisation. */
+  { id: 11, name: 'Other — to be classified by an official', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false, requires_classification: true }
+];
+
+/* ---------------- what each category has to capture ----------------
+   These exist so the official can test the elements of the crime instead of
+   guessing at them, and so the complainant is asked once, at the point they
+   still remember. Everything here is asked of the complainant in their own
+   words; none of it is a legal finding.
+
+   Sexual offences are deliberately the shortest list on this page. The full
+   statement is taken in private by a trained officer, so the form asks only
+   what is needed to route the case and get the person help now. */
+const CATEGORY_FIELDS = {
+  1: [ /* Theft */
+    { key: 'what_taken', label: 'What was taken', type: 'textarea', required: true },
+    { key: 'value', label: 'Approximate value (R)', type: 'text', required: true },
+    { key: 'serials', label: 'Serial or IMEI numbers', type: 'text',
+      hint: 'If you have them. This is what makes recovered property traceable back to you.' },
+    { key: 'proof_of_ownership', label: 'Do you have proof of ownership?', type: 'select',
+      options: ['Yes, I have it', 'I can obtain it', 'No'] },
+    { key: 'insured', label: 'Is the item insured?', type: 'select', options: ['Yes', 'No', 'Not sure'] }
+  ],
+  2: [ /* Common assault */
+    { key: 'how_it_happened', label: 'How the assault happened', type: 'textarea', required: true },
+    { key: 'injuries', label: 'Injuries sustained', type: 'textarea', required: true },
+    { key: 'medical_treatment', label: 'Did you receive medical treatment?', type: 'select',
+      options: ['No', 'Yes — a doctor completed a J88', 'Yes — but no J88 yet', 'Not yet, but I intend to'],
+      hint: 'A J88 is the medical form a doctor completes for a criminal case. If you saw a doctor, say so — it is important evidence.' },
+    { key: 'relationship_to_suspect', label: 'Your relationship to the person who assaulted you', type: 'text',
+      hint: 'Stranger, neighbour, colleague, family member, and so on.' }
+  ],
+  3: [ /* Sexual offence — minimal by design */
+    { key: 'urgent_care', label: 'Do you need urgent medical care or a safe place right now?', type: 'select',
+      options: ['Yes', 'No'], required: true },
+    { key: 'when_recent', label: 'Did this happen in the last 72 hours?', type: 'select',
+      options: ['Yes', 'No', 'I would rather not say'], required: true,
+      hint: 'This is asked only so that time-sensitive medical evidence is not lost.' }
+  ],
+  4: [ /* Domestic violence */
+    { key: 'immediate_danger', label: 'Are you in immediate danger?', type: 'select',
+      options: ['Yes', 'No'], required: true },
+    { key: 'relationship_to_suspect', label: 'Your relationship to the person', type: 'text', required: true,
+      hint: 'Spouse, partner, former partner, parent, child, someone you share a home with.' },
+    { key: 'protection_order', label: 'Is there a protection order?', type: 'select',
+      options: ['No', 'Yes, one exists', 'I have applied but it is not granted yet'], required: true },
+    { key: 'protection_order_number', label: 'Protection order number', type: 'text',
+      hint: 'If one exists. A breach of a protection order is a separate offence.' },
+    { key: 'children_present', label: 'Were children present?', type: 'select', options: ['Yes', 'No'] }
+  ],
+  5: [ /* Fraud */
+    { key: 'misrepresentation', label: 'What were you told, or led to believe?', type: 'textarea', required: true,
+      hint: 'The false statement or impression that caused you to part with money.' },
+    { key: 'amount_lost', label: 'Amount lost (R)', type: 'text', required: true },
+    { key: 'payment_method', label: 'How did you pay?', type: 'select',
+      options: ['EFT / bank transfer', 'Cash', 'Card', 'Cryptocurrency', 'Mobile money', 'Other'] },
+    { key: 'bank_references', label: 'Bank references', type: 'textarea',
+      hint: 'Account numbers paid into, reference numbers, dates of payment.' },
+    { key: 'documents_held', label: 'Contracts, messages or emails you still have', type: 'textarea',
+      hint: 'Describe them here and upload what you can below.' }
+  ],
+  6: [ /* Vehicle theft */
+    { key: 'registration', label: 'Registration number', type: 'text', required: true },
+    { key: 'vin', label: 'VIN or chassis number', type: 'text' },
+    { key: 'make_model', label: 'Make and model', type: 'text', required: true },
+    { key: 'colour', label: 'Colour', type: 'text', required: true },
+    { key: 'where_parked', label: 'Where it was parked', type: 'textarea', required: true },
+    { key: 'who_had_keys', label: 'Who had the keys', type: 'text', required: true },
+    { key: 'tracking_company', label: 'Tracking company, if fitted', type: 'text',
+      hint: 'Contact them as well as reporting here — they can act immediately.' }
+  ],
+  7: [ /* Burglary */
+    { key: 'point_of_entry', label: 'Point of entry', type: 'textarea', required: true,
+      hint: 'Which door, window or opening, and whether it was forced.' },
+    { key: 'what_taken', label: 'What was taken, with values and serial numbers', type: 'textarea', required: true },
+    { key: 'insured', label: 'Are the premises or contents insured?', type: 'select', options: ['Yes', 'No', 'Not sure'] },
+    { key: 'cctv_alarm', label: 'Is there CCTV or an alarm?', type: 'select',
+      options: ['No', 'CCTV', 'Alarm', 'Both'],
+      hint: 'If there is footage, do not let it be overwritten — most systems record over it within days.' }
+  ],
+  8: [ /* Malicious damage to property */
+    { key: 'what_damaged', label: 'What was damaged', type: 'textarea', required: true },
+    { key: 'repair_cost', label: 'Estimated cost to repair (R)', type: 'text', required: true },
+    { key: 'proof_of_ownership', label: 'Do you have proof of ownership?', type: 'select',
+      options: ['Yes, I have it', 'I can obtain it', 'No'] },
+    { key: 'photos_taken', label: 'Have you photographed the damage?', type: 'select', options: ['Yes', 'Not yet'],
+      hint: 'Photograph it before anything is repaired or cleared, and upload the photographs below.' }
+  ],
+  9: [ /* Robbery */
+    { key: 'what_taken', label: 'What was taken', type: 'textarea', required: true },
+    { key: 'violence_used', label: 'What was said or done to make you hand it over', type: 'textarea', required: true,
+      hint: 'The force or the threat is what makes this robbery rather than theft.' },
+    { key: 'weapon', label: 'Was a weapon involved?', type: 'select',
+      options: ['No weapon', 'Firearm', 'Knife', 'Other weapon', 'I could not see'], required: true },
+    { key: 'injuries', label: 'Injuries sustained', type: 'textarea' },
+    { key: 'medical_treatment', label: 'Did you receive medical treatment?', type: 'select',
+      options: ['No', 'Yes — a doctor completed a J88', 'Yes — but no J88 yet', 'Not yet, but I intend to'] },
+    { key: 'serials', label: 'Serial or IMEI numbers of what was taken', type: 'text' }
+  ],
+  10: [ /* Crimen injuria or intimidation */
+    { key: 'what_was_said', label: 'What was said or done', type: 'textarea', required: true },
+    { key: 'channel', label: 'How did it reach you?', type: 'select',
+      options: ['In person', 'Telephone call', 'SMS or WhatsApp', 'Social media', 'Email', 'Other'], required: true },
+    { key: 'repeated', label: 'Has this happened more than once?', type: 'select', options: ['Yes', 'No'] },
+    { key: 'evidence_saved', label: 'Have you kept the messages or recordings?', type: 'select',
+      options: ['Yes', 'No', 'Some of them'],
+      hint: 'Do not delete them. Screenshots with the sender and the date visible are best.' }
+  ],
+  11: []   /* Other — the free description is the whole of it */
+};
+
+/* Tables every database must have. A browser that stored a database before a
+   feature was added still holds the old shape, and a missing table reads as
+   undefined rather than an empty list — which throws on the first .find(). */
+const TABLES = ['stations', 'specialisations', 'categories', 'users', 'complainants',
+  'intakes', 'dockets', 'refusals', 'escalations', 'assignments', 'status_history',
+  'notes', 'evidence', 'custody', 'arrests', 'handovers', 'audit_log',
+  'complainant_evidence', 'withdrawals', 'notifications', 'closures', 'transfers',
+  'witnesses', 'forensics'];
+
+/* ---------------- decision vocabularies ----------------
+   These lists come from the activity diagrams, and the reasons they are short
+   is the point of the system.
+
+   A report may only be turned away at intake for two reasons. "Insufficient
+   evidence" is a *closure* category — it can only be judged after an
+   investigation, so offering it at intake lets a station refuse a case it has
+   not looked at. "Withdrawn by complainant" is not the station's decision to
+   take either: a withdrawal must come from the complainant, through the
+   withdrawal flow, confirmed by them. Referral is not on this list at all —
+   NI 3/2011 forbids sending a complainant to another station, so a
+   wrong-jurisdiction report is registered here first and then transferred. */
+const INTAKE_REFUSAL_REASONS = [
+  'No offence disclosed — an element of the definition is missing',
+  'Duplicate of an existing report (verified)'
+];
+
+/* For domestic violence and sexual offences, a verified duplicate is the only
+   thing that may stop a docket being opened (Domestic Violence Act duties). */
+const DUPLICATE_REASON = INTAKE_REFUSAL_REASONS[1];
+const NO_OFFENCE_REASON = INTAKE_REFUSAL_REASONS[0];
+
+/* Only the first two elements of an offence are testable at intake. The other
+   two — unlawfulness and culpability — are defences for an accused to raise
+   and the state to disprove, so they are not on this list. */
+const MISSING_ELEMENTS = ['Legality', 'Conduct'];
+
+/* A decision that closes a report has to be written down in a way another
+   person can weigh. "nf" is not a reason, and it should never reach the
+   commander — so the floor is enforced where the decision is recorded, not
+   only in the screen that collects it. */
+const MIN_REASON_LENGTH = 25;
+
+/* Filing categories, each with the evidence it cannot be filed without. */
+const FILING_CATEGORIES = [
+  { key: 'undetected', label: 'Undetected / insufficient evidence', brought_forward_months: 12 },
+  { key: 'pending_arrest', label: 'Filed pending arrest' },
+  { key: 'pending_recovery', label: 'Filed pending recovery' },
+  { key: 'withdrawn', label: 'Withdrawn by complainant' },
+  { key: 'evidence_compromised', label: 'Evidence missing or compromised' },
+  { key: 'sent_to_court', label: 'Sent to court' }
+];
+
+/* Diagram 3 — reassignment reasons are a fixed list so that "reassigned" is a
+   category that can be counted and audited, not a free-text shrug. */
+const REASSIGNMENT_REASONS = [
+  'Extended sick leave',
+  'Suspended or under discipline',
+  'Caseload too high',
+  'Needs more experience',
+  'Urgency',
+  'Other'
+];
+
+/* ---------------- blocking codes to guide anchors ----------------
+   Every refusal this data layer returns carries a `code`. The dashboards turn
+   that code into a "Why is this blocked?" link through this one table, so the
+   link always points at the rule that actually failed rather than at whatever
+   anchor someone typed next to the button. Adding a new guard means adding its
+   code here once, not editing every screen that can hit it. */
+const RULE_ANCHORS = {
+  /* intake */
+  invalid_grounds:        { role: 'official',  anchor: 'rule-invalid-grounds' },
+  insufficient_at_intake: { role: 'official',  anchor: 'rule-insufficient-at-intake' },
+  no_offence:             { role: 'official',  anchor: 'rule-no-offence' },
+  duplicate:              { role: 'official',  anchor: 'rule-duplicate' },
+  declined_charge:        { role: 'official',  anchor: 'rule-declined-charge' },
+  protected_categories:   { role: 'official',  anchor: 'rule-protected-categories' },
+  intake_preconditions:   { role: 'official',  anchor: 'rule-intake-preconditions' },
+  transfer:               { role: 'official',  anchor: 'rule-transfer' },
+  cosign:                 { role: 'commander', anchor: 'rule-cosign' },
+
+  /* investigation and closure */
+  exhibit:                { role: 'detective', anchor: 'rule-exhibit' },
+  witnesses:              { role: 'detective', anchor: 'rule-witnesses' },
+  closure_status:         { role: 'detective', anchor: 'rule-closure-status' },
+  closure_diary:          { role: 'detective', anchor: 'rule-closure-diary' },
+  closure_evidence:       { role: 'detective', anchor: 'rule-closure-evidence' },
+  filing_categories:      { role: 'detective', anchor: 'rule-filing-categories' },
+  withdrawal:             { role: 'detective', anchor: 'rule-withdrawal' },
+  reopen:                 { role: 'detective', anchor: 'rule-reopen' },
+  closure_request:        { role: 'detective', anchor: 'rule-closure-request' },
+
+  /* command */
+  approve_closure:        { role: 'commander', anchor: 'rule-approve-closure' },
+  separation:             { role: 'commander', anchor: 'rule-separation' },
+  allocation:             { role: 'commander', anchor: 'rule-allocation' },
+  reassign:               { role: 'commander', anchor: 'rule-reassign' },
+  escalations:            { role: 'commander', anchor: 'rule-escalations' }
+};
+
+const REOPEN_TRIGGERS = {
+  arrest: 'A circulated suspect was arrested',
+  recovery: 'Circulated property was recovered',
+  forensic: 'A DNA or fingerprint match identified a perpetrator',
+  review: 'Brought-forward review'
+};
+
+/* ---------------- browser storage ----------------
+   Reading localStorage is not guaranteed to work. A browser hands back a
+   SecurityError when the page is opened from a file:// path it treats as an
+   opaque origin, when site data is blocked, and in some private-browsing modes.
+   Left unguarded, that throws on the very first Store call and every button on
+   the page silently does nothing. The prototype falls back to memory instead,
+   so the screens still work for the length of the visit, and sets a flag the
+   pages use to warn that nothing will be kept. */
+
+let memoryStore = {};
+let storageWorks = true;
+
+function storageGet(key) {
+  try { return localStorage.getItem(key); }
+  catch (e) { storageWorks = false; return key in memoryStore ? memoryStore[key] : null; }
+}
+
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); }
+  catch (e) { storageWorks = false; memoryStore[key] = String(value); }
+}
+
+function storageRemove(key) {
+  try { localStorage.removeItem(key); } catch (e) { storageWorks = false; }
+  delete memoryStore[key];
+}
+
 /* ---------------- core read / write ---------------- */
 
 function read() {
-  const raw = localStorage.getItem(DB_KEY);
+  const raw = storageGet(DB_KEY);
   if (!raw) { const fresh = seed(); write(fresh); return fresh; }
-  try { return JSON.parse(raw); }
+  let db;
+  try { db = JSON.parse(raw); }
   catch (e) { const fresh = seed(); write(fresh); return fresh; }
+  if (migrate(db)) write(db);
+  return db;
 }
 
-function write(db) { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+/* Brings a stored database up to the current shape in place, and reports
+   whether anything changed so read() only writes when it must. Reports already
+   captured by a complainant are theirs, so the database is upgraded rather than
+   thrown away and re-seeded. */
+function migrate(db) {
+  let changed = false;
+
+  if (!db.counters) { db.counters = { intake: 0, cas: 0, complainant: 0 }; changed = true; }
+  ['intake', 'cas', 'complainant'].forEach(k => {
+    if (typeof db.counters[k] !== 'number') { db.counters[k] = 0; changed = true; }
+  });
+
+  TABLES.forEach(t => {
+    if (!Array.isArray(db[t])) { db[t] = []; changed = true; }
+  });
+
+  /* Categories gained a default priority and a withdrawal protection flag. */
+  CATEGORIES.forEach(def => {
+    const cat = db.categories.find(c => c.id === def.id);
+    if (!cat) { db.categories.push(Object.assign({}, def)); changed = true; return; }
+    if (cat.default_priority === undefined) { cat.default_priority = def.default_priority; changed = true; }
+    if (cat.protected_from_withdrawal === undefined) {
+      cat.protected_from_withdrawal = def.protected_from_withdrawal; changed = true;
+    }
+  });
+
+  /* Complainants gained a permanent CMP- number, an ID number and gender. */
+  db.complainants.forEach(c => {
+    if (!c.complainant_number) { c.complainant_number = newComplainantNumber(db); changed = true; }
+    if (c.id_number === undefined) { c.id_number = null; changed = true; }
+    if (c.gender === undefined) { c.gender = null; changed = true; }
+  });
+  const highest = db.complainants.reduce((m, c) =>
+    Math.max(m, Number(String(c.complainant_number || '').replace(/\D/g, '')) || 0), 0);
+  if (db.counters.complainant < highest) { db.counters.complainant = highest; changed = true; }
+
+  /* Refusals gained a co-sign workflow. One recorded before that existed had
+     already taken effect under the old single-signature rule, so it is marked
+     confirmed rather than being dragged back into a queue for a signature
+     nobody is waiting for. */
+  db.refusals.forEach(r => {
+    if (!r.status) {
+      r.status = 'confirmed';
+      r.raised_at = r.raised_at || r.refused_at || null;
+      r.cosigned_by = r.cosigned_by || null;
+      r.cosigned_at = r.cosigned_at || null;
+      r.cosign_note = r.cosign_note || 'Recorded before a second signature was required.';
+      changed = true;
+    }
+  });
+
+  /* Dockets gained a brought-forward review date. */
+  db.dockets.forEach(d => {
+    if (d.brought_forward_at === undefined) { d.brought_forward_at = null; changed = true; }
+  });
+
+  /* Dockets gained a system-assigned priority; intakes gained a docket_id. */
+  db.dockets.forEach(d => {
+    if (d.priority === undefined) {
+      const intake = db.intakes.find(i => i.id === d.intake_id);
+      const cat = intake && db.categories.find(c => c.id === intake.category_id);
+      d.priority = cat ? cat.default_priority : 'Medium';
+      changed = true;
+    }
+  });
+  db.intakes.forEach(i => {
+    if (i.docket_id === undefined) {
+      const d = db.dockets.find(x => x.intake_id === i.id);
+      i.docket_id = d ? d.id : null;
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
+function write(db) { storageSet(DB_KEY, JSON.stringify(db)); }
 
 function nextId(list) {
   return list.reduce((m, r) => Math.max(m, r.id || 0), 0) + 1;
@@ -39,6 +380,26 @@ function newIntakeNumber(db, stationCode) {
 function newCasNumber(db, stationCode) {
   db.counters.cas += 1;
   return `CAS-2026-${stationCode}-${pad(db.counters.cas)}`;
+}
+
+/* A token for the QR code on the receipt. It makes the link unguessable — a
+   reference number on its own is sequential, so INT-…-000008 implies
+   INT-…-000009 exists. It is NOT a credential: whoever lands on it still has
+   to prove who they are, because a printed slip can be lost or photographed
+   and case content is private under the Victims' Charter. */
+function newTrackToken() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let out = '';
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    for (let i = 0; i < 32; i++) out += alphabet[bytes[i] % alphabet.length];
+    return out;
+  }
+  /* Only reached where the crypto API is missing; still unguessable enough for
+     a prototype, and the OTP is what actually protects the content. */
+  for (let i = 0; i < 32; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
 }
 
 function newComplainantNumber(db) {
@@ -86,11 +447,13 @@ function logAudit(db, entry) {
 
 const Session = {
   get() {
-    const raw = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const raw = storageGet(SESSION_KEY);
+    if (!raw) return null;
+    try { return JSON.parse(raw); }
+    catch (e) { storageRemove(SESSION_KEY); return null; }
   },
-  set(user) { localStorage.setItem(SESSION_KEY, JSON.stringify(user)); },
-  clear() { localStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(SESSION_KEY); }
+  set(user) { storageSet(SESSION_KEY, JSON.stringify(user)); },
+  clear() { storageRemove(SESSION_KEY); }
 };
 
 /* ==========================================================================
@@ -101,7 +464,10 @@ const Store = {
 
   /* ----- meta ----- */
   all() { return read(); },
-  reset() { localStorage.removeItem(DB_KEY); Session.clear(); },
+  reset() { storageRemove(DB_KEY); Session.clear(); },
+
+  /* False when the browser refused to keep data; pages warn the user. */
+  storageWorks() { read(); return storageWorks; },
 
   /* ----- auth ----- */
   login(email, password) {
@@ -161,6 +527,7 @@ const Store = {
     const rec = {
       id: nextId(db.intakes),
       intake_number: newIntakeNumber(db, station.code),
+      track_token: newTrackToken(),
       complainant_id: comp.id,
       category_id: Number(data.category_id),
       station_id: station.id,
@@ -170,6 +537,23 @@ const Store = {
       incident_datetime: data.incident_datetime,
       created_by: data.created_by || null,
       created_at: new Date().toISOString(),
+      /* The category-specific answers, kept as given. These are what let an
+         official test the elements of the offence instead of guessing. */
+      details: data.details || {},
+      /* Optional by design: not being able to identify anyone is never a
+         ground to refuse a docket. */
+      suspect: data.suspect && (data.suspect.description || data.suspect.name)
+        ? { can_identify: true,
+            name: (data.suspect.name || '').trim(),
+            description: (data.suspect.description || '').trim(),
+            contact: (data.suspect.contact || '').trim() }
+        : { can_identify: false },
+      /* Witnesses the complainant knows about. They become witness records on
+         the docket the moment it is opened, so the closure checklist sees them
+         even if nobody re-types them. */
+      witnesses_reported: (data.witnesses || [])
+        .filter(w => (w.name || '').trim())
+        .map(w => ({ name: w.name.trim(), contact: (w.contact || '').trim() })),
       disposition: 'pending',
       disposed_at: null,
       disposed_by: null,
@@ -225,6 +609,52 @@ const Store = {
     return { ok: true, intake, docket, refusal, history, escalations, complainant: comp };
   },
 
+  /* A scanned link identifies a report; it does not open it. This says only
+     whether the link is good, and who must be verified — never case content. */
+  trackLinkCheck(reference, token) {
+    const db = read();
+    const ref = String(reference || '').toUpperCase().trim();
+    const t = String(token || '').trim();
+    if (!ref || !t) return { ok: false };
+
+    let intake = db.intakes.find(i => i.intake_number.toUpperCase() === ref);
+    if (!intake) {
+      const docket = db.dockets.find(d => d.cas_number.toUpperCase() === ref);
+      if (docket) intake = db.intakes.find(i => i.id === docket.intake_id);
+    }
+    if (!intake || !intake.track_token || intake.track_token !== t) return { ok: false };
+
+    const comp = db.complainants.find(c => c.id === intake.complainant_id);
+    return { ok: true, intake_id: intake.id,
+      /* enough to tell someone which number to enter, and nothing more */
+      id_hint: comp && comp.id_number ? comp.id_number.slice(-4) : null,
+      has_id: !!(comp && comp.id_number) };
+  },
+
+  /* The second half: the ID number on the report, then an OTP. Only when both
+     are satisfied does the caller get the report itself. */
+  verifyTrackIdNumber(intakeId, idNumber) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake) return { ok: false };
+    const comp = db.complainants.find(c => c.id === intake.complainant_id);
+    const given = String(idNumber || '').replace(/\D/g, '');
+    if (!comp || !comp.id_number || comp.id_number !== given) return { ok: false };
+    return { ok: true, contact: comp.contact, name: comp.name };
+  },
+
+  /* Recorded so that a case being opened from a scanned link is as visible in
+     the audit trail as any other access to it. */
+  logTrackLinkAccess(intakeId, outcome) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake) return;
+    logAudit(db, { action_type: 'view', entity_type: 'intake', entity_id: intake.id,
+      case_id: intake.docket_id || null,
+      description: `Tracking link for ${intake.intake_number}: ${outcome}` });
+    write(db);
+  },
+
   trackByComplainantNumber(number, fullName) {
     const db = read();
     const num = String(number).toUpperCase().trim();
@@ -239,53 +669,136 @@ const Store = {
   },
 
   /* ----- disposition (police official) ----- */
-  openDocket(intakeId, actor) {
+  /* What a report still needs before a docket can be opened on it. Right now
+     that is classification: a report filed under "Other" carries no category,
+     so it has no priority and no specialisation to route by until an official
+     names the crime. */
+  classificationNeeded(intakeId) {
     const db = read();
-    const intake = db.intakes.find(i => i.id === intakeId);
-    if (!intake || intake.disposition !== 'pending') return null;
-    const station = db.stations.find(s => s.id === intake.station_id);
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake) return false;
     const cat = db.categories.find(c => c.id === intake.category_id);
-
-    const docket = {
-      id: nextId(db.dockets),
-      cas_number: newCasNumber(db, station.code),
-      intake_id: intake.id,
-      complainant_id: intake.complainant_id,
-      category_id: intake.category_id,
-      station_id: intake.station_id,
-      registered_by: actor.id,
-      current_status: 'registered',
-      registered_at: new Date().toISOString(),
-      last_activity_at: new Date().toISOString(),
-      detective_id: null,
-      closure_type: null,
-      priority: cat ? cat.default_priority : 'Medium'
-    };
-    db.dockets.push(docket);
-
-    intake.disposition = 'docket_opened';
-    intake.disposed_at = new Date().toISOString();
-    intake.disposed_by = actor.id;
-    intake.docket_id = docket.id;
-
-    db.status_history.push({ id: nextId(db.status_history), docket_id: docket.id,
-      previous_status: null, new_status: 'registered', changed_by: actor.id,
-      changed_at: docket.registered_at, notes: 'Docket opened from report' });
-
-    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
-      action_type: 'create', entity_type: 'docket', entity_id: docket.id, case_id: docket.id,
-      description: `Docket opened from ${intake.intake_number}, ${docket.cas_number} issued — priority ${docket.priority} (auto by category)` });
-
-    // FR14 — auto-assign by crime category and lowest caseload
-    const assigned = autoAssign(db, docket);
-    write(db);
-    return { docket, assigned };
+    return !!(cat && cat.requires_classification);
   },
 
+  categoryFields(categoryId) {
+    return (CATEGORY_FIELDS[Number(categoryId)] || []).map(f => Object.assign({}, f));
+  },
+
+  /* Where the guide explains a given blocking code. Returns null for a code
+     with no rule behind it, so a caller can leave the link out rather than
+     sending someone to a page that will not answer them. */
+  ruleFor(code) {
+    const r = RULE_ANCHORS[code];
+    return r ? { role: r.role, anchor: r.anchor, href: `guide.html?role=${r.role}#${r.anchor}` } : null;
+  },
+
+  openDocket(intakeId, actor, options = {}) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake || intake.disposition !== 'pending') return null;
+
+    /* An official classifying an "Other" report is a decision in its own
+       right: it sets the priority and the specialisation, so it is recorded
+       against their name rather than quietly changing the report. */
+    const current = db.categories.find(c => c.id === intake.category_id);
+    if (current && current.requires_classification) {
+      const chosen = db.categories.find(c => c.id === Number(options.category_id));
+      if (!chosen || chosen.requires_classification) return null;
+      const from = current.name;
+      intake.category_id = chosen.id;
+      logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+        action_type: 'classify', entity_type: 'intake', entity_id: intake.id,
+        description: `${intake.intake_number} classified as ${chosen.name} (was "${from}") by ${actor.name}` });
+    }
+
+    const res = openDocketInternal(db, intake, actor);
+    /* Diagram 2 ends by telling the complainant who is investigating. When the
+       system could not allocate, say that plainly rather than leaving silence
+       where a name should be — the station commander has it either way. */
+    notify(db, intake, res.assigned
+      ? `A case has been opened. Your case number is ${res.docket.cas_number}, and ${res.assigned.name} is investigating it.`
+      : `A case has been opened. Your case number is ${res.docket.cas_number}. An investigating officer is being allocated by the station commander.`);
+    write(db);
+    return res;
+  },
+
+  /* The reasons a docket may be refused, for this report. Returns the short
+     list, and for a protected category only the verified-duplicate reason. */
+  missingElements() { return MISSING_ELEMENTS.slice(); },
+
+  /* Whether a reference given as a duplicate actually resolves to something on
+     the system. A case number nobody can find is not a verified duplicate. */
+  referenceResolves(reference) {
+    const ref = String(reference || '').toUpperCase().trim();
+    if (!ref) return false;
+    const db = read();
+    return db.intakes.some(i => i.intake_number.toUpperCase() === ref) ||
+           db.dockets.some(d => d.cas_number.toUpperCase() === ref);
+  },
+
+  refusalReasonsFor(intakeId) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    const cat = intake && db.categories.find(c => c.id === intake.category_id);
+    if (cat && cat.protected_from_withdrawal) return [DUPLICATE_REASON];
+    return INTAKE_REFUSAL_REASONS.slice();
+  },
+
+  /* A refusal is a request, not a decision. It takes effect only when a second
+     person signs it off, and that person may not be the official who raised it
+     (NI 3/2011 s1(a) — the decision not to open a docket is co-signed). Until
+     then the report stays pending and keeps counting towards the 24-hour
+     reconciliation, so a refusal cannot be used to make a report disappear. */
   recordRefusal(intakeId, actor, payload) {
     const db = read();
-    const intake = db.intakes.find(i => i.id === intakeId);
-    if (!intake || intake.disposition !== 'pending') return null;
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake || intake.disposition !== 'pending') {
+      return { ok: false, code: 'intake_preconditions', error: 'That report has already been dealt with.' };
+    }
+    if (db.refusals.some(r => r.intake_id === intake.id && r.status === 'pending_cosign')) {
+      return { ok: false, code: 'cosign',
+        error: 'A refusal on this report is already waiting for a second signature.' };
+    }
+
+    const allowed = Store.refusalReasonsFor(intake.id);
+    if (!allowed.includes(payload.reason_category)) {
+      const cat = db.categories.find(c => c.id === intake.category_id);
+      /* "Insufficient evidence" is the ground people reach for most, and the
+         guide answers it specifically, so it gets its own code. */
+      const insufficient = /insufficient|not enough|no evidence/i.test(payload.reason_category || '');
+      return { ok: false,
+        code: cat && cat.protected_from_withdrawal ? 'protected_categories'
+          : insufficient ? 'insufficient_at_intake' : 'invalid_grounds',
+        error: cat && cat.protected_from_withdrawal
+          ? `For ${cat.name.toLowerCase()}, a docket may only be withheld for a verified duplicate.`
+          : insufficient
+            ? 'Whether evidence is sufficient is decided after an investigation, not at intake.'
+            : 'That is not a reason a docket may be refused at intake.' };
+    }
+    const detail = (payload.reason_detail || '').trim();
+    if (detail.length < MIN_REASON_LENGTH) {
+      return { ok: false, code: 'no_offence',
+        error: `Write the full reason — at least ${MIN_REASON_LENGTH} characters. Another person has to weigh this decision on what you write here.` };
+    }
+    /* "No offence disclosed" means a named element of the definition is
+       missing. Naming which one, against the definition consulted, is what
+       makes the decision reviewable — and what stops the phrase being used as
+       a shrug (NI 3/2011; four elements of an offence). */
+    if (payload.reason_category === NO_OFFENCE_REASON) {
+      if (!MISSING_ELEMENTS.includes(payload.missing_element)) {
+        return { ok: false, code: 'no_offence',
+          error: 'Name the element that is missing: legality, or conduct.' };
+      }
+      if (!(payload.definition_reference || '').trim()) {
+        return { ok: false, code: 'no_offence',
+          error: 'Record the crime definition you consulted.' };
+      }
+    }
+    if (payload.reason_category === DUPLICATE_REASON && !(payload.duplicate_of || '').trim()) {
+      return { ok: false, code: 'duplicate',
+        error: 'Give the case or report number this duplicates, so it can be verified.' };
+    }
 
     const rec = {
       id: nextId(db.refusals),
@@ -293,52 +806,146 @@ const Store = {
       station_id: intake.station_id,
       officer_id: actor.id,
       reason_category: payload.reason_category,
-      reason_detail: payload.reason_detail,
-      refused_at: new Date().toISOString(),
-      complainant_notified_at: new Date().toISOString(),
-      reviewed_by: null,
-      reviewed_at: null
+      reason_detail: detail,
+      duplicate_of: (payload.duplicate_of || '').trim() || null,
+      missing_element: payload.missing_element || null,
+      definition_reference: (payload.definition_reference || '').trim() || null,
+      status: 'pending_cosign',
+      raised_at: new Date().toISOString(),
+      refused_at: null,
+      complainant_notified_at: null,
+      cosigned_by: null,
+      cosigned_at: null,
+      cosign_note: ''
     };
     db.refusals.push(rec);
 
-    intake.disposition = 'refused';
-    intake.disposed_at = rec.refused_at;
-    intake.disposed_by = actor.id;
-
     logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
-      action_type: 'refusal', entity_type: 'intake', entity_id: intake.id,
-      description: `Refusal recorded on ${intake.intake_number} — ${payload.reason_category}` });
+      action_type: 'refusal_proposed', entity_type: 'intake', entity_id: intake.id,
+      description: `Refusal proposed on ${intake.intake_number} — ${rec.reason_category}. Awaiting a second signature.` });
     write(db);
-    return rec;
+    return { ok: true, refusal: rec };
   },
 
-  recordReferral(intakeId, actor, payload) {
+  /* The second signature. Refusing to co-sign is not a neutral act: the
+     diagram's "no" branch means the docket must be opened, so rejecting the
+     refusal opens it here rather than dropping the report back into limbo. */
+  cosignRefusal(refusalId, actor, agree, note, options = {}) {
     const db = read();
-    const intake = db.intakes.find(i => i.id === intakeId);
-    if (!intake || intake.disposition !== 'pending') return null;
+    const rec = db.refusals.find(r => r.id === Number(refusalId));
+    if (!rec || rec.status !== 'pending_cosign') {
+      return { ok: false, code: 'cosign', error: 'That refusal is no longer waiting for a signature.' };
+    }
+    if (actor.role !== 'commander') {
+      return { ok: false, code: 'cosign',
+        error: 'Only the station commander can sign off a decision not to open a docket.' };
+    }
+    if (rec.officer_id === actor.id) {
+      return { ok: false, code: 'separation',
+        error: 'The official who proposed a refusal cannot sign it off. A second person must.' };
+    }
+    /* Signing is the consequential act — it is what ends the report — so the
+       reasons matter at least as much there as in refusing to sign. Both need
+       a written note. */
+    const cosignNote = (note || '').trim();
+    if (cosignNote.length < MIN_REASON_LENGTH) {
+      return { ok: false, code: 'cosign',
+        error: agree
+          ? `Record why the facts disclose no offence — at least ${MIN_REASON_LENGTH} characters.`
+          : `Record why a docket must be opened — at least ${MIN_REASON_LENGTH} characters.` };
+    }
+    /* The system cannot read a statement and tell whether it discloses a
+       crime. What it can do is refuse to let that judgement be implicit: the
+       commander states that the comparison was made against the definition. */
+    if (agree && !options.definition_checked) {
+      return { ok: false, code: 'cosign',
+        error: 'Confirm that you compared the facts against the crime definition before signing.' };
+    }
 
-    const rec = {
-      id: nextId(db.refusals),
-      intake_id: intake.id,
-      station_id: intake.station_id,
-      officer_id: actor.id,
-      reason_category: 'Referred — jurisdiction',
-      reason_detail: payload.reason_detail,
-      referred_to_station: payload.referred_to_station,
-      refused_at: new Date().toISOString(),
-      complainant_notified_at: new Date().toISOString()
-    };
-    db.refusals.push(rec);
+    const intake = db.intakes.find(i => i.id === rec.intake_id);
+    rec.cosigned_by = actor.id;
+    rec.cosigned_at = new Date().toISOString();
+    rec.cosign_note = cosignNote;
+    rec.definition_checked = !!options.definition_checked;
 
-    intake.disposition = 'referred';
+    if (!agree) {
+      rec.status = 'rejected';
+      rec.reversed_official_id = rec.officer_id;
+      /* Logged as a reversal, against the official who proposed it. One is a
+         disagreement; a pattern of them is what the oversight report is for. */
+      logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+        action_type: 'decision_reversed', entity_type: 'intake', entity_id: intake.id,
+        description: `Decision by ${Store.userName(rec.officer_id)} reversed on ${intake.intake_number}: ` +
+          `refusal not signed off — ${rec.cosign_note}. A docket must be opened.` });
+      write(db);
+      return { ok: true, refusal: rec, mustOpenDocket: true };
+    }
+
+    rec.status = 'confirmed';
+    rec.refused_at = rec.cosigned_at;
+    rec.complainant_notified_at = rec.cosigned_at;
+    intake.disposition = 'refused';
     intake.disposed_at = rec.refused_at;
-    intake.disposed_by = actor.id;
+    intake.disposed_by = rec.officer_id;
 
+    notify(db, intake, `No docket was opened. Reason: ${rec.reason_category}. ` +
+      'You may escalate this to the station commander from your tracking page.');
     logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
-      action_type: 'referral', entity_type: 'intake', entity_id: intake.id,
-      description: `Referred ${intake.intake_number} to ${payload.referred_to_station}` });
+      action_type: 'refusal', entity_type: 'intake', entity_id: intake.id,
+      description: `Refusal on ${intake.intake_number} signed off by ${actor.name} — ${rec.reason_category}` });
     write(db);
-    return rec;
+    return { ok: true, refusal: rec };
+  },
+
+  pendingRefusals(stationId) {
+    const db = read();
+    return db.refusals.filter(r => r.status === 'pending_cosign' &&
+      (!stationId || r.station_id === stationId));
+  },
+
+  /* Wrong jurisdiction is not a reason to turn someone away. The docket is
+     opened at the station that received the report — so a case number exists
+     and the complainant holds it — and only then does the docket move
+     (NI 3/2011: a complainant may not be referred to another station). */
+  registerAndTransfer(intakeId, actor, payload) {
+    const db = read();
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (!intake || intake.disposition !== 'pending') {
+      return { ok: false, code: 'intake_preconditions', error: 'That report has already been dealt with.' };
+    }
+    const to = db.stations.find(s => s.id === Number(payload.to_station_id));
+    if (!to) return { ok: false, code: 'transfer', error: 'Choose the station that should receive this case.' };
+    if (to.id === intake.station_id) {
+      return { ok: false, code: 'transfer', error: 'That is the station already handling this report.' };
+    }
+    if (!(payload.reason || '').trim()) {
+      return { ok: false, code: 'transfer', error: 'A reason for the transfer is required.' };
+    }
+
+    const opened = openDocketInternal(db, intake, actor);
+    const from = db.stations.find(s => s.id === opened.docket.station_id);
+
+    opened.docket.station_id = to.id;
+    opened.docket.last_activity_at = new Date().toISOString();
+    /* The detective auto-assigned at the receiving station's expense would be
+       wrong — the new station allocates its own, so the docket arrives
+       unassigned and shows up on their commander's dashboard. */
+    opened.docket.detective_id = null;
+    db.assignments.filter(a => a.docket_id === opened.docket.id && a.is_active)
+      .forEach(a => { a.is_active = false; a.unassigned_at = opened.docket.last_activity_at; });
+
+    db.transfers.push({ id: nextId(db.transfers), docket_id: opened.docket.id,
+      from_station_id: from.id, to_station_id: to.id, transferred_by: actor.id,
+      transferred_at: opened.docket.last_activity_at, reason: payload.reason.trim() });
+
+    notify(db, intake, `Your case number is ${opened.docket.cas_number}. ` +
+      `It has been registered at ${from.name} and transferred to ${to.name}, which covers where this happened. ` +
+      'You do not need to report it again.');
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'transfer', entity_type: 'docket', entity_id: opened.docket.id, case_id: opened.docket.id,
+      description: `${opened.docket.cas_number} registered at ${from.name} and transferred to ${to.name} — ${payload.reason.trim()}` });
+    write(db);
+    return { ok: true, docket: opened.docket, to };
   },
 
   /* ----- dockets ----- */
@@ -355,10 +962,12 @@ const Store = {
     const db = read();
     const d = db.dockets.find(x => x.id === Number(docketId));
     if (!d) return null;
+    /* Closing is not a status change. It goes through requestClosure and a
+       commander's approval, so this path cannot be used to bypass either. */
+    if (newStatus === 'closed') return null;
     const prev = d.current_status;
     d.current_status = newStatus;
     d.last_activity_at = new Date().toISOString();
-    if (newStatus === 'closed') d.closure_type = notes || 'Finalised';
 
     db.status_history.push({ id: nextId(db.status_history), docket_id: d.id,
       previous_status: prev, new_status: newStatus, changed_by: actor.id,
@@ -369,6 +978,417 @@ const Store = {
       description: `${d.cas_number}: ${labelStatus(prev)} to ${labelStatus(newStatus)}` });
     write(db);
     return d;
+  },
+
+  /* ----- closing (filing) a docket -----
+     Closure is a request plus an approval by someone else, never a single
+     action. Each filing category carries the one thing it cannot be filed
+     without, so "undetected" cannot be used on a docket nobody worked on and
+     "sent to court" cannot be claimed without a prosecutor reference. */
+  filingCategories() { return FILING_CATEGORIES.map(c => Object.assign({}, c)); },
+
+  /* What a given category still needs on this docket. Returns null when the
+     category may be used, so the UI can grey out what is not available yet
+     rather than letting a detective find out after typing everything. */
+  closureBlocker(docketId, categoryKey, payload = {}) {
+    const db = read();
+    const block = (code, message) => ({ code, message });
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return block('closure_request', 'Case not found.');
+    if (d.current_status === 'closed') return block('closure_status', 'This case is already closed.');
+    if (d.current_status !== 'under_investigation') {
+      return block('closure_status', 'A docket cannot be closed before it has been investigated.');
+    }
+    const intake = db.intakes.find(i => i.id === d.intake_id);
+
+    switch (categoryKey) {
+      case 'undetected': {
+        const diary = db.notes.filter(n => n.docket_id === d.id).length;
+        const exhibits = db.evidence.filter(e => e.docket_id === d.id).length;
+        if (!diary || !exhibits) {
+          return block('closure_evidence',
+            'Undetected requires investigation diary entries and at least one evidence item on the docket.');
+        }
+        return null;
+      }
+      case 'pending_arrest':
+        return (payload.warrant_reference || '').trim() ? null
+          : block('filing_categories', 'A circulated warrant of arrest reference is required.');
+      case 'pending_recovery':
+        return (payload.circulation_reference || '').trim() ? null
+          : block('filing_categories', 'A property circulation reference is required.');
+      case 'withdrawn': {
+        const approved = db.withdrawals.some(w => w.intake_id === (intake && intake.id) &&
+          w.status === 'decided' && w.decision === 'approved');
+        return approved ? null : block('withdrawal',
+          "SAPS may not withdraw a case on the complainant's behalf. The complainant must request withdrawal and the commander must approve it first.");
+      }
+      case 'evidence_compromised': {
+        if (!(payload.discrepancy_report || '').trim()) {
+          return block('filing_categories', 'A discrepancy report is required.');
+        }
+        const anyCustody = db.evidence.filter(e => e.docket_id === d.id)
+          .some(e => db.custody.some(c => c.evidence_id === e.id));
+        return anyCustody ? null : block('exhibit',
+          'A custody log entry is required before evidence can be reported compromised.');
+      }
+      case 'sent_to_court':
+        return (payload.prosecutor_reference || '').trim() ? null
+          : block('filing_categories',
+            'The prosecutor reference is required. The decision to prosecute belongs to the NPA.');
+      default:
+        return block('filing_categories', 'Choose a filing category.');
+    }
+  },
+
+  requestClosure(docketId, actor, payload) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return { ok: false, error: 'Case not found.' };
+    const cat = FILING_CATEGORIES.find(c => c.key === payload.category);
+    if (!cat) return { ok: false, code: 'filing_categories', error: 'Choose a filing category.' };
+    if (db.closures.some(c => c.docket_id === d.id && c.status === 'pending_approval')) {
+      return { ok: false, code: 'closure_request',
+        error: 'A closure request on this case is already awaiting approval.' };
+    }
+    const blocker = Store.closureBlocker(d.id, cat.key, payload);
+    if (blocker) return { ok: false, code: blocker.code, error: blocker.message };
+
+    const rec = { id: nextId(db.closures), docket_id: d.id, category: cat.key,
+      category_label: cat.label, requested_by: actor.id, requested_at: new Date().toISOString(),
+      warrant_reference: (payload.warrant_reference || '').trim() || null,
+      circulation_reference: (payload.circulation_reference || '').trim() || null,
+      discrepancy_report: (payload.discrepancy_report || '').trim() || null,
+      prosecutor_reference: (payload.prosecutor_reference || '').trim() || null,
+      motivation: (payload.motivation || '').trim(),
+      status: 'pending_approval', decision: null, decided_by: null,
+      decided_at: null, decision_reason: null };
+    db.closures.push(rec);
+    d.last_activity_at = rec.requested_at;
+
+    /* Evidence going missing is a supervisor matter in its own right, whatever
+       happens to the closure request. */
+    if (cat.key === 'evidence_compromised') {
+      db.escalations.push({ id: nextId(db.escalations), docket_id: d.id, intake_id: null,
+        reason: `Evidence missing or compromised on ${d.cas_number} — ${rec.discrepancy_report}`,
+        raised_by_complainant: false, raised_at: rec.requested_at, decision_maker_id: actor.id,
+        commander_id: null, response: null, responded_at: null, status: 'open' });
+    }
+
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'closure_requested', entity_type: 'docket', entity_id: d.id, case_id: d.id,
+      description: `Closure requested on ${d.cas_number} — ${cat.label}. Awaiting commander approval.` });
+    write(db);
+    return { ok: true, closure: rec };
+  },
+
+  /* ----- the commander's closure inspection -----
+     NI 3/2011 already makes him responsible for seeing that dockets are
+     investigated effectively, for inspecting them personally and for writing
+     the diary instructions. So approving a closure is not a rubber stamp on
+     someone else's work — it is checking that his own instructions were
+     carried out. Each item below is a guard, and the screen shows the docket's
+     own evidence beside it so the check is done against the record rather than
+     against an assurance. */
+  closureChecklist(closureId, approverId) {
+    const db = read();
+    const c = db.closures.find(x => x.id === Number(closureId));
+    if (!c) return null;
+    const d = db.dockets.find(x => x.id === c.docket_id);
+    const intake = db.intakes.find(i => i.id === d.intake_id);
+
+    const items = [];
+
+    /* 1. every diary instruction executed or explained */
+    const instructions = db.notes.filter(n => n.docket_id === d.id && n.note_type === 'instruction');
+    const openInstructions = instructions.filter(n => n.status === 'open');
+    items.push({
+      key: 'instructions',
+      code: 'closure_diary',
+      label: 'Every instruction in the investigation diary was executed or explained',
+      ok: openInstructions.length === 0,
+      detail: instructions.length
+        ? `${instructions.length} instruction(s); ${openInstructions.length} still open`
+        : 'No instructions were written in the diary',
+      missing: openInstructions.map(n => n.note_text),
+      evidence: instructions.map(n => ({
+        text: n.note_text,
+        state: n.status,
+        answer: n.response,
+        by: n.responded_by ? Store.userName(n.responded_by) : null
+      }))
+    });
+
+    /* 2. statements from the complainant and every identified witness */
+    const witnesses = db.witnesses.filter(w => w.docket_id === d.id);
+    const witnessGaps = witnesses.filter(w => !w.statement_text && !w.no_statement_reason);
+    const complainantStatement = !!(intake && (intake.incident_description || '').trim());
+    items.push({
+      key: 'statements',
+      code: 'closure_evidence',
+      label: 'Statements from the complainant and all identified witnesses are in the docket',
+      ok: complainantStatement && witnessGaps.length === 0,
+      detail: `Complainant statement ${complainantStatement ? 'on file' : 'missing'}; ` +
+        `${witnesses.length} witness(es) identified, ${witnessGaps.length} with neither a statement nor a reason`,
+      missing: (complainantStatement ? [] : ['The complainant\'s statement is not in the docket'])
+        .concat(witnessGaps.map(w => `No statement and no reason recorded for ${w.name}`)),
+      evidence: witnesses.map(w => ({
+        text: w.name,
+        state: w.statement_text ? 'statement taken' : (w.no_statement_reason ? 'explained' : 'outstanding'),
+        answer: w.statement_text || w.no_statement_reason
+      }))
+    });
+
+    /* 3. forensic submissions have results, or are accounted for */
+    const forensics = db.forensics.filter(f => f.docket_id === d.id);
+    const forensicGaps = forensics.filter(f => !f.result && !f.accounted_for_reason);
+    items.push({
+      key: 'forensics',
+      code: 'closure_evidence',
+      label: 'Forensic and other evidence was submitted, and results are back or accounted for',
+      ok: forensicGaps.length === 0,
+      detail: forensics.length
+        ? `${forensics.length} submission(s); ${forensicGaps.length} with no result and no explanation`
+        : 'Nothing was submitted for forensic analysis',
+      missing: forensicGaps.map(f => `${f.description} (${f.lab_reference}) — no result, not accounted for`),
+      evidence: forensics.map(f => ({
+        text: `${f.description} (${f.lab_reference})`,
+        state: f.result ? 'result received' : (f.accounted_for_reason ? 'accounted for' : 'outstanding'),
+        answer: f.result || f.accounted_for_reason
+      }))
+    });
+
+    /* 4. exhibits registered, chain of custody intact */
+    const exhibits = db.evidence.filter(e => e.docket_id === d.id);
+    const exhibitGaps = [];
+    exhibits.forEach(e => {
+      if (!e.saps13_number) exhibitGaps.push(`${e.exhibit_number} has no SAPS 13 register number`);
+      if (!db.custody.some(cu => cu.evidence_id === e.id)) exhibitGaps.push(`${e.exhibit_number} has no custody entry`);
+      if (!e.current_holder_id) exhibitGaps.push(`${e.exhibit_number} is held by nobody`);
+    });
+    items.push({
+      key: 'exhibits',
+      code: 'exhibit',
+      label: 'Exhibits are properly registered, with the chain of custody intact',
+      ok: exhibitGaps.length === 0,
+      detail: exhibits.length ? `${exhibits.length} exhibit(s) on the docket` : 'No exhibits on the docket',
+      missing: exhibitGaps,
+      evidence: exhibits.map(e => ({
+        text: `${e.exhibit_number} — ${e.description}`,
+        state: e.saps13_number ? `SAPS 13: ${e.saps13_number}` : 'no register number',
+        answer: `Held by ${Store.userName(e.current_holder_id)}, ${db.custody.filter(cu => cu.evidence_id === e.id).length} custody entr(ies)`
+      }))
+    });
+
+    /* 5. circulation where a suspect or property is still outstanding */
+    const suspectIdentified = db.arrests.some(a => a.docket_id === d.id) ||
+      exhibits.some(e => e.suspect_id_number);
+    const needsCirculation = c.category === 'pending_arrest' || c.category === 'pending_recovery' ||
+      (c.category === 'undetected' && suspectIdentified);
+    const circulationRef = c.warrant_reference || c.circulation_reference;
+    items.push({
+      key: 'circulation',
+      code: 'closure_evidence',
+      label: 'Circulation was done where a suspect or property is outstanding',
+      ok: !needsCirculation || !!circulationRef,
+      detail: needsCirculation
+        ? (circulationRef ? `Circulated under ${circulationRef}` : 'A circulation reference is required and none is recorded')
+        : 'No suspect or property is outstanding on this filing',
+      missing: needsCirculation && !circulationRef
+        ? ['A suspect or property is outstanding but no circulation reference is recorded']
+        : []
+    });
+
+    /* 6. the requesting detective is not the approver */
+    items.push({
+      key: 'separation',
+      code: 'separation',
+      label: 'The requesting detective is not the approver',
+      ok: approverId == null || c.requested_by !== approverId,
+      detail: `Requested by ${Store.userName(c.requested_by)}`,
+      missing: approverId != null && c.requested_by === approverId
+        ? ['You requested this closure, so you cannot approve it'] : []
+    });
+
+    /* 7. the complainant is told — a consequence of approving, not a precondition */
+    items.push({
+      key: 'notify',
+      code: 'approve_closure',
+      label: 'The complainant is notified of the outcome and the reason (Victims\' Charter)',
+      ok: true,
+      informational: true,
+      detail: 'Sent automatically on approval, with the filing category and your reason',
+      missing: []
+    });
+
+    const blocking = items.filter(i => !i.informational && !i.ok);
+    return { closure: c, docket: d, items, blocking, canApprove: blocking.length === 0 };
+  },
+
+  decideClosure(closureId, actor, decision, reason) {
+    const db = read();
+    const rec = db.closures.find(c => c.id === Number(closureId));
+    if (!rec || rec.status !== 'pending_approval') {
+      return { ok: false, error: 'That closure request has already been decided.' };
+    }
+    if (rec.requested_by === actor.id) {
+      return { ok: false, code: 'separation',
+        error: 'The investigating officer who requested a closure cannot approve it.' };
+    }
+    if (!(reason || '').trim()) {
+      return { ok: false, code: 'approve_closure', error: 'A reason is required for this decision.' };
+    }
+
+    /* Approval is gated on the inspection. Refusing a closure is not — a
+       commander must always be able to send a case back, whatever state it is
+       in, and in fact a failing checklist is the usual reason to do so. */
+    if (decision === 'approved') {
+      const check = Store.closureChecklist(rec.id, actor.id);
+      if (!check.canApprove) {
+        /* The code names the first failing item, so the link lands on that rule
+           rather than on the checklist in general. */
+        return { ok: false, code: check.blocking[0].code || 'approve_closure',
+          blocking: check.blocking,
+          error: 'This docket does not yet satisfy the closure checklist: ' +
+            check.blocking.map(b => b.label).join('; ') };
+      }
+    }
+
+    const d = db.dockets.find(x => x.id === rec.docket_id);
+    const intake = db.intakes.find(i => i.id === d.intake_id);
+    rec.status = 'decided';
+    rec.decision = decision;
+    rec.decided_by = actor.id;
+    rec.decided_at = new Date().toISOString();
+    rec.decision_reason = reason.trim();
+
+    if (decision === 'approved') {
+      rec.approved_by = actor.id;
+      rec.approved_at = rec.decided_at;
+      rec.checklist_confirmed = Store.closureChecklist(rec.id, actor.id).items
+        .filter(i => !i.informational).map(i => ({ key: i.key, ok: i.ok }));
+      const prev = d.current_status;
+      d.current_status = 'closed';
+      d.closure_type = rec.category_label;
+      d.last_activity_at = rec.decided_at;
+      const cat = FILING_CATEGORIES.find(c => c.key === rec.category);
+      if (cat && cat.brought_forward_months) {
+        const bf = new Date(rec.decided_at);
+        bf.setMonth(bf.getMonth() + cat.brought_forward_months);
+        d.brought_forward_at = bf.toISOString();
+      }
+      db.status_history.push({ id: nextId(db.status_history), docket_id: d.id,
+        previous_status: prev, new_status: 'closed', changed_by: actor.id,
+        changed_at: rec.decided_at, notes: `${rec.category_label} — ${rec.decision_reason}` });
+      if (intake) {
+        notify(db, intake, `Your case ${d.cas_number} has been filed: ${rec.category_label}. ` +
+          `Reason: ${rec.decision_reason}. If you disagree, you may escalate this from your tracking page.`);
+      }
+    } else {
+      d.last_activity_at = rec.decided_at;
+    }
+
+    /* The audit entry carries who approved it, when, under which category and
+       on what reasons — the four things an inspection afterwards asks for. */
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: decision === 'approved' ? 'closure_approved' : 'closure_rejected',
+      entity_type: 'docket', entity_id: d.id, case_id: d.id,
+      performed_at: rec.decided_at,
+      description: `Closure of ${d.cas_number} ${decision} by ${actor.name} (${labelRole(actor.role)}) ` +
+        `on ${rec.decided_at} — category: ${rec.category_label}; ` +
+        `detective's motivation: ${rec.motivation || '—'}; commander's reason: ${rec.decision_reason}` +
+        (d.brought_forward_at ? `; brought forward for review on ${d.brought_forward_at}` : '') });
+    write(db);
+    return { ok: true, closure: rec };
+  },
+
+  closures(filter = {}) {
+    const db = read();
+    return db.closures.filter(c =>
+      (!filter.status || c.status === filter.status) &&
+      (!filter.docket_id || c.docket_id === Number(filter.docket_id)))
+      .slice().reverse();
+  },
+
+  /* ----- reopening a filed docket (Diagram 6) -----
+     Reopening is deliberately easy for the triggers the system can see for
+     itself — an arrest, a recovery, a forensic match — and deliberately
+     conditional for a person: a manual reopening needs something new. */
+  reopenDocket(docketId, actor, payload) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return { ok: false, error: 'Case not found.' };
+    if (d.current_status !== 'closed') return { ok: false, error: 'This case is not filed.' };
+
+    const trigger = payload.trigger || 'manual';
+    if (trigger === 'manual' && !(payload.new_evidence || '').trim()) {
+      return { ok: false, error: 'A manual reopening requires new evidence or new information.' };
+    }
+
+    const now = new Date().toISOString();
+    const prev = d.current_status;
+    d.current_status = 'under_investigation';
+    d.closure_type = null;
+    d.brought_forward_at = null;
+    d.last_activity_at = now;
+
+    const why = trigger === 'manual' ? payload.new_evidence.trim() : REOPEN_TRIGGERS[trigger] || trigger;
+    db.status_history.push({ id: nextId(db.status_history), docket_id: d.id,
+      previous_status: prev, new_status: 'under_investigation', changed_by: actor ? actor.id : null,
+      changed_at: now, notes: `Reopened — ${why}` });
+
+    const assigned = d.detective_id ? null : autoAssign(db, d);
+    const intake = db.intakes.find(i => i.id === d.intake_id);
+    if (intake) notify(db, intake, `Your case ${d.cas_number} has been reopened. Reason: ${why}.`);
+
+    logAudit(db, { user_id: actor ? actor.id : null, user_name: actor ? actor.name : 'System',
+      user_role: actor ? actor.role : 'system',
+      action_type: 'reopen', entity_type: 'docket', entity_id: d.id, case_id: d.id,
+      description: `${d.cas_number} reopened — ${why}` });
+    write(db);
+    return { ok: true, docket: d, assigned };
+  },
+
+  /* Diagram 6 puts the complainant in the same lane as the detective for a
+     manual reopening: they may ask, on the same condition — something new. */
+  requestReopenByComplainant(docketId, newEvidence) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return { ok: false, error: 'Case not found.' };
+    if (d.current_status !== 'closed') return { ok: false, error: 'This case is not filed.' };
+    if (!(newEvidence || '').trim()) {
+      return { ok: false, error: 'Tell us what is new. A filed case reopens on new evidence or new information.' };
+    }
+    write(db);
+    return Store.reopenDocket(d.id, null, { trigger: 'manual',
+      new_evidence: `Raised by the complainant: ${newEvidence.trim()}` });
+  },
+
+  /* The review happened and nothing new came of it: the docket stays filed,
+     the review is on the record, and the clock is set for another 12 months
+     rather than the item sitting on the dashboard forever. */
+  noteBroughtForwardReview(docketId, actor) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d || d.current_status !== 'closed') return { ok: false, error: 'This case is not filed.' };
+    const next = new Date();
+    next.setMonth(next.getMonth() + 12);
+    d.brought_forward_at = next.toISOString();
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'brought_forward_review', entity_type: 'docket', entity_id: d.id, case_id: d.id,
+      description: `Brought-forward review of ${d.cas_number} — nothing new, remains filed` });
+    write(db);
+    return { ok: true, docket: d };
+  },
+
+  /* Filed dockets whose 12-month review date has arrived — the commander's
+     brought-forward queue. */
+  broughtForwardDue(stationId) {
+    const db = read();
+    const now = Date.now();
+    return db.dockets.filter(d => d.current_status === 'closed' && d.brought_forward_at &&
+      new Date(d.brought_forward_at).getTime() <= now &&
+      (!stationId || d.station_id === stationId));
   },
 
   addNote(docketId, actor, text) {
@@ -385,6 +1405,159 @@ const Store = {
   },
 
   notes(docketId) { return read().notes.filter(n => n.docket_id === Number(docketId)); },
+
+  /* ----- investigation diary instructions -----
+     NI 3/2011 makes the commander responsible for inspecting dockets and
+     writing instructions in the diary. Those instructions are the thing he
+     checks at closure, so they are recorded as their own kind of entry with a
+     state, not as prose in a note nobody can query. An instruction is answered
+     either by doing it or by explaining why it was not done — both close it,
+     and the difference is visible. */
+  addInstruction(docketId, actor, text) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return { ok: false, error: 'Case not found.' };
+    if (actor.role !== 'commander') {
+      return { ok: false, error: 'Only the station commander writes instructions in the investigation diary.' };
+    }
+    if (!(text || '').trim()) return { ok: false, error: 'An instruction cannot be empty.' };
+
+    const rec = { id: nextId(db.notes), docket_id: d.id, author_id: actor.id,
+      note_text: text.trim(), note_type: 'instruction', status: 'open',
+      response: '', responded_by: null, responded_at: null,
+      created_at: new Date().toISOString() };
+    db.notes.push(rec);
+    d.last_activity_at = rec.created_at;
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'instruction', entity_type: 'note', entity_id: rec.id, case_id: d.id,
+      description: `Instruction written in the diary of ${d.cas_number}: ${rec.note_text}` });
+    write(db);
+    return { ok: true, instruction: rec };
+  },
+
+  answerInstruction(noteId, actor, outcome, response) {
+    const db = read();
+    const n = db.notes.find(x => x.id === Number(noteId));
+    if (!n || n.note_type !== 'instruction') return { ok: false, error: 'Instruction not found.' };
+    if (n.status !== 'open') return { ok: false, error: 'That instruction has already been answered.' };
+    if (!(response || '').trim()) {
+      return { ok: false, error: outcome === 'executed'
+        ? 'Record what was done.' : 'An explanation is required when an instruction was not carried out.' };
+    }
+    const d = db.dockets.find(x => x.id === n.docket_id);
+    n.status = outcome === 'executed' ? 'executed' : 'explained';
+    n.response = response.trim();
+    n.responded_by = actor.id;
+    n.responded_at = new Date().toISOString();
+    d.last_activity_at = n.responded_at;
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'instruction_answered', entity_type: 'note', entity_id: n.id, case_id: d.id,
+      description: `Diary instruction on ${d.cas_number} ${n.status} — ${n.response}` });
+    write(db);
+    return { ok: true, instruction: n };
+  },
+
+  instructions(docketId) {
+    return read().notes.filter(n => n.docket_id === Number(docketId) && n.note_type === 'instruction');
+  },
+
+  /* ----- witnesses and their statements -----
+     A witness who was identified but never gave a statement, with no reason
+     recorded, is the gap the checklist is looking for. */
+  addWitness(docketId, actor, payload) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return { ok: false, error: 'Case not found.' };
+    if (!(payload.name || '').trim()) return { ok: false, error: "The witness's name is required." };
+
+    const rec = { id: nextId(db.witnesses), docket_id: d.id, name: payload.name.trim(),
+      contact: (payload.contact || '').trim(), identified_by: actor.id,
+      identified_at: new Date().toISOString(),
+      statement_text: '', statement_taken_at: null, no_statement_reason: '' };
+    db.witnesses.push(rec);
+    d.last_activity_at = rec.identified_at;
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'witness', entity_type: 'witness', entity_id: rec.id, case_id: d.id,
+      description: `Witness identified on ${d.cas_number}: ${rec.name}` });
+    write(db);
+    return { ok: true, witness: rec };
+  },
+
+  recordWitnessStatement(witnessId, actor, statementText, noStatementReason) {
+    const db = read();
+    const w = db.witnesses.find(x => x.id === Number(witnessId));
+    if (!w) return { ok: false, error: 'Witness not found.' };
+    const statement = (statementText || '').trim();
+    const reason = (noStatementReason || '').trim();
+    if (!statement && !reason) {
+      return { ok: false, error: 'Record the statement, or why it could not be taken.' };
+    }
+    const d = db.dockets.find(x => x.id === w.docket_id);
+    if (statement) { w.statement_text = statement; w.statement_taken_at = new Date().toISOString(); w.no_statement_reason = ''; }
+    else { w.no_statement_reason = reason; }
+    d.last_activity_at = new Date().toISOString();
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'statement', entity_type: 'witness', entity_id: w.id, case_id: d.id,
+      description: statement
+        ? `Statement taken from witness ${w.name} on ${d.cas_number}`
+        : `No statement from witness ${w.name} on ${d.cas_number} — ${reason}` });
+    write(db);
+    return { ok: true, witness: w };
+  },
+
+  witnesses(docketId) { return read().witnesses.filter(w => w.docket_id === Number(docketId)); },
+
+  /* ----- forensic submissions -----
+     Submitted and forgotten is the failure this guards against: every
+     submission must come back with a result, or be accounted for. */
+  submitForensic(docketId, actor, payload) {
+    const db = read();
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (!d) return { ok: false, error: 'Case not found.' };
+    if (!(payload.description || '').trim()) return { ok: false, error: 'Describe what was submitted.' };
+    if (!(payload.lab_reference || '').trim()) return { ok: false, error: 'The laboratory reference is required.' };
+    if (payload.evidence_id &&
+        !db.evidence.some(e => e.id === Number(payload.evidence_id) && e.docket_id === d.id)) {
+      return { ok: false, error: 'That exhibit does not belong to this case.' };
+    }
+
+    const rec = { id: nextId(db.forensics), docket_id: d.id,
+      evidence_id: payload.evidence_id ? Number(payload.evidence_id) : null,
+      description: payload.description.trim(), lab_reference: payload.lab_reference.trim(),
+      submitted_by: actor.id, submitted_at: new Date().toISOString(),
+      result: '', result_at: null, accounted_for_reason: '' };
+    db.forensics.push(rec);
+    d.last_activity_at = rec.submitted_at;
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'forensic_submitted', entity_type: 'forensic', entity_id: rec.id, case_id: d.id,
+      description: `Forensic submission on ${d.cas_number} — ${rec.description} (${rec.lab_reference})` });
+    write(db);
+    return { ok: true, forensic: rec };
+  },
+
+  recordForensicResult(forensicId, actor, result, accountedForReason) {
+    const db = read();
+    const f = db.forensics.find(x => x.id === Number(forensicId));
+    if (!f) return { ok: false, error: 'Forensic submission not found.' };
+    const res = (result || '').trim();
+    const reason = (accountedForReason || '').trim();
+    if (!res && !reason) {
+      return { ok: false, error: 'Record the result, or account for why it is outstanding.' };
+    }
+    const d = db.dockets.find(x => x.id === f.docket_id);
+    if (res) { f.result = res; f.result_at = new Date().toISOString(); f.accounted_for_reason = ''; }
+    else { f.accounted_for_reason = reason; }
+    d.last_activity_at = new Date().toISOString();
+    logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+      action_type: 'forensic_result', entity_type: 'forensic', entity_id: f.id, case_id: d.id,
+      description: res
+        ? `Forensic result on ${d.cas_number} (${f.lab_reference}): ${res}`
+        : `Forensic submission ${f.lab_reference} on ${d.cas_number} outstanding — ${reason}` });
+    write(db);
+    return { ok: true, forensic: f };
+  },
+
+  forensics(docketId) { return read().forensics.filter(f => f.docket_id === Number(docketId)); },
   statusHistory(docketId) { return read().status_history.filter(h => h.docket_id === Number(docketId)); },
 
   /* ----- evidence -----
@@ -398,22 +1571,39 @@ const Store = {
     const d = db.dockets.find(x => x.id === Number(docketId));
     if (!d) return { ok: false, error: 'Case not found.' };
     if (!payload.description || !payload.description.trim()) {
-      return { ok: false, error: 'Describe the exhibit before it can be recorded.' };
+      return { ok: false, code: 'exhibit', error: 'Describe the exhibit before it can be recorded.' };
     }
     if (!payload.image_data_url) {
-      return { ok: false, error: 'A photograph of the exhibit (or a scanned copy, for a document) is required before it can be recorded.' };
+      return { ok: false, code: 'exhibit', error: 'A photograph of the exhibit (or a scanned copy, for a document) is required before it can be recorded.' };
+    }
+    /* Chain of custody starts with knowing where the item physically is and
+       under which register entry. Without both, "registered" means nothing
+       later — there is no way to go and find the item. */
+    if (!(payload.storage_location || '').trim()) {
+      return { ok: false, code: 'exhibit', error: 'The storage location is required — the chain of custody starts with where the item is.' };
+    }
+    if (!(payload.saps13_number || '').trim()) {
+      return { ok: false, code: 'exhibit', error: 'The SAPS 13 register number is required before an exhibit can be recorded.' };
     }
 
     const suspectFields = [payload.suspect_name, payload.suspect_id_number, payload.suspect_photo_data_url];
     if (suspectFields.some(f => f) && !suspectFields.every(f => f)) {
-      return { ok: false, error: 'To link a suspect, their name, ID number and photograph are all required.' };
+      return { ok: false, code: 'exhibit', error: 'To link a suspect, their name, ID number and photograph are all required.' };
+    }
+    /* "Linked to docket AND to suspect ID where a suspect exists." Once an
+       arrest is on this docket a suspect does exist, so an exhibit that names
+       nobody and links to no charge is an unattributed item on a case that has
+       a named accused. */
+    const arrestsOnCase = db.arrests.filter(a => a.docket_id === d.id);
+    if (arrestsOnCase.length && !payload.suspect_id_number && !payload.linked_arrest_id) {
+      return { ok: false, code: 'exhibit', error: 'This case has a recorded suspect, so the exhibit must be linked to a suspect or to a charge.' };
     }
     if (payload.suspect_id_number && !/^\d{13}$/.test(payload.suspect_id_number)) {
-      return { ok: false, error: "The suspect's ID number must be 13 digits." };
+      return { ok: false, code: 'exhibit', error: "The suspect's ID number must be 13 digits." };
     }
     if (payload.linked_arrest_id &&
         !db.arrests.some(a => a.id === Number(payload.linked_arrest_id) && a.docket_id === d.id)) {
-      return { ok: false, error: 'The charge you linked does not belong to this case.' };
+      return { ok: false, code: 'exhibit', error: 'The charge you linked does not belong to this case.' };
     }
 
     const ev = createExhibit(db, d, actor, payload);
@@ -484,12 +1674,17 @@ const Store = {
     return read().complainant_evidence.filter(e => e.intake_id === Number(intakeId));
   },
 
-  reviewComplainantEvidence(id, actor, decision, note) {
+  reviewComplainantEvidence(id, actor, decision, note, saps13) {
     const db = read();
     const ce = db.complainant_evidence.find(e => e.id === Number(id));
     if (!ce) return null;
     if (decision === 'rejected' && !(note || '').trim()) {
       return { ok: false, error: 'A reason is required to reject submitted evidence.' };
+    }
+    /* Accepting turns the file into an exhibit, and an exhibit needs a register
+       entry like any other — where it came from does not change that. */
+    if (decision === 'accepted' && !(saps13 || '').trim()) {
+      return { ok: false, error: 'A SAPS 13 register number is required to accept this as an exhibit.' };
     }
     const intake = db.intakes.find(i => i.id === ce.intake_id);
     const docket = intake && intake.docket_id ? db.dockets.find(d => d.id === intake.docket_id) : null;
@@ -503,6 +1698,7 @@ const Store = {
         description: ce.description || ce.file_name,
         evidence_type: ce.file_type.startsWith('image/') ? 'Photograph' : 'Document',
         storage_location: 'Submitted by complainant',
+        saps13_number: saps13.trim(),
         image_data_url: ce.data_url,
         custody_purpose: 'Accepted from complainant submission'
       });
@@ -651,10 +1847,15 @@ const Store = {
   /* ----- escalation ----- */
   raiseEscalation(payload) {
     const db = read();
+    /* An escalation never returns to the person who took the decision being
+       complained about (Diagram 7). Record who that was, so respondEscalation
+       can refuse them and the matter routes upward instead. */
+    const decisionMaker = decisionMakerFor(db, payload.docket_id, payload.intake_id);
     const rec = { id: nextId(db.escalations), docket_id: payload.docket_id || null,
       intake_id: payload.intake_id || null, reason: payload.reason,
       raised_by_complainant: payload.raised_by_complainant !== false,
       raised_at: new Date().toISOString(), commander_id: null,
+      decision_maker_id: decisionMaker, routed_upward: false,
       response: null, responded_at: null, status: 'open' };
     db.escalations.push(rec);
     logAudit(db, { action_type: 'escalate', entity_type: 'escalation', entity_id: rec.id,
@@ -670,6 +1871,20 @@ const Store = {
     const db = read();
     const e = db.escalations.find(x => x.id === Number(id));
     if (!e) return null;
+    /* The whole point of escalating is to reach someone above the decision.
+       If the decision-maker is the one holding this queue, the escalation goes
+       up to cluster level instead of being answered by them. */
+    if (e.decision_maker_id && e.decision_maker_id === actor.id) {
+      e.routed_upward = true;
+      e.status = 'routed_upward';
+      logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+        action_type: 'escalation_routed', entity_type: 'escalation', entity_id: e.id,
+        case_id: e.docket_id,
+        description: `Escalation on a decision taken by ${actor.name} routed to cluster level — it cannot be answered by the decision-maker` });
+      write(db);
+      return { ok: false, routedUpward: true,
+        error: 'You took the decision being complained about, so you cannot answer this escalation. It has been routed to cluster level.' };
+    }
     e.commander_id = actor.id;
     e.response = `${outcome} — ${response}`;
     e.responded_at = new Date().toISOString();
@@ -678,7 +1893,7 @@ const Store = {
       action_type: 'escalation_response', entity_type: 'escalation', entity_id: e.id,
       case_id: e.docket_id, description: `Escalation answered: ${outcome}` });
     write(db);
-    return e;
+    return { ok: true, escalation: e };
   },
 
   escalations(filter = {}) {
@@ -687,26 +1902,113 @@ const Store = {
   },
 
   /* ----- assignment ----- */
-  reassign(docketId, detectiveId, actor, reason) {
+  reassignmentReasons() { return REASSIGNMENT_REASONS.slice(); },
+
+  /* Diagram 3. Three guards, in the order the diagram puts them: the role,
+     a reason off the fixed list, and separation of duties — a commander who
+     approved a closure on this docket may not also move it to a different
+     detective, because that is the same person shaping the same case twice.
+     That request goes to the cluster commander instead. */
+  reassign(docketId, detectiveId, actor, reason, detail) {
     const db = read();
     const d = db.dockets.find(x => x.id === Number(docketId));
     const det = db.users.find(u => u.id === Number(detectiveId));
-    if (!d || !det) return null;
+    if (!d || !det) return { ok: false, error: 'Case or detective not found.' };
+
+    if (actor.role !== 'commander') {
+      return { ok: false, code: 'allocation',
+        error: 'Only the station commander allocates and reassigns dockets.' };
+    }
+    if (!REASSIGNMENT_REASONS.includes(reason)) {
+      return { ok: false, code: 'reassign', error: 'Choose a reason from the list.' };
+    }
+    if (reason === 'Other' && !(detail || '').trim()) {
+      return { ok: false, code: 'reassign', error: 'Give the detail when the reason is "Other".' };
+    }
+
+    const approvedClosure = db.closures.some(c => c.docket_id === d.id &&
+      c.status === 'decided' && c.decision === 'approved' && c.decided_by === actor.id);
+    if (approvedClosure) {
+      db.escalations.push({ id: nextId(db.escalations), docket_id: d.id, intake_id: null,
+        reason: `Reassignment of ${d.cas_number} requested by the commander who approved its closure — routed to cluster level.`,
+        raised_by_complainant: false, raised_at: new Date().toISOString(),
+        decision_maker_id: actor.id, routed_upward: true, commander_id: null,
+        response: null, responded_at: null, status: 'routed_upward' });
+      logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+        action_type: 'reassign_blocked', entity_type: 'docket', entity_id: d.id, case_id: d.id,
+        description: `Reassignment of ${d.cas_number} blocked — ${actor.name} approved a closure on this docket. Routed to the cluster commander.` });
+      write(db);
+      return { ok: false, code: 'separation', routedToCluster: true,
+        error: 'You approved a closure on this docket, so you cannot also reassign it. The request has gone to the cluster commander.' };
+    }
+
+    const fullReason = reason === 'Other' ? `Other — ${detail.trim()}`
+      : detail && detail.trim() ? `${reason} — ${detail.trim()}` : reason;
+    const now = new Date().toISOString();
     const open = db.assignments.find(a => a.docket_id === d.id && a.is_active);
-    if (open) { open.is_active = false; open.unassigned_at = new Date().toISOString(); }
+    const previous = open ? db.users.find(u => u.id === open.detective_id) : null;
+    if (open) { open.is_active = false; open.unassigned_at = now; }
     db.assignments.push({ id: nextId(db.assignments), docket_id: d.id, detective_id: det.id,
-      assigned_by: actor.id, assigned_at: new Date().toISOString(),
-      assignment_method: 'commander_override', is_active: true, override_reason: reason });
+      previous_detective_id: previous ? previous.id : null,
+      assigned_by: actor.id, assigned_at: now,
+      assignment_method: 'commander_override', is_active: true,
+      reason_category: reason, override_reason: fullReason });
     d.detective_id = det.id;
-    d.last_activity_at = new Date().toISOString();
+    d.last_activity_at = now;
+
+    const intake = db.intakes.find(i => i.id === d.intake_id);
+    if (intake) notify(db, intake, `The officer investigating ${d.cas_number} has changed. ${det.name} is now handling it.`);
+
     logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
       action_type: 'override', entity_type: 'assignment', entity_id: d.id, case_id: d.id,
-      description: `${d.cas_number} reassigned to ${det.name} — ${reason}` });
+      description: `${d.cas_number} reassigned to ${det.name} — ${fullReason}` });
     write(db);
-    return d;
+    return { ok: true, docket: d, detective: det };
   },
 
   assignments(docketId) { return read().assignments.filter(a => a.docket_id === Number(docketId)); },
+
+  /* Diagram 3 — the pattern the oversight report is meant to catch: dockets
+     repeatedly taken away from one detective, or one commander doing most of
+     the moving. Neither is proof of anything; both are worth a look. */
+  reassignmentPatterns(stationId, threshold = 3) {
+    const db = read();
+    const inStation = id => {
+      const d = db.dockets.find(x => x.id === id);
+      return d && (!stationId || d.station_id === stationId);
+    };
+    const moves = db.assignments.filter(a => a.assignment_method === 'commander_override' &&
+      inStation(a.docket_id));
+
+    const awayFrom = {}, byActor = {};
+    moves.forEach(a => {
+      if (a.previous_detective_id) awayFrom[a.previous_detective_id] = (awayFrom[a.previous_detective_id] || 0) + 1;
+      if (a.assigned_by) byActor[a.assigned_by] = (byActor[a.assigned_by] || 0) + 1;
+    });
+
+    const flags = [];
+    Object.entries(awayFrom).forEach(([id, n]) => {
+      if (n >= threshold) flags.push({ kind: 'away_from_detective', user_id: Number(id), count: n,
+        text: `${n} dockets reassigned away from ${Store.userName(id)}` });
+    });
+    Object.entries(byActor).forEach(([id, n]) => {
+      if (n >= threshold) flags.push({ kind: 'by_actor', user_id: Number(id), count: n,
+        text: `${n} reassignments made by ${Store.userName(id)}` });
+    });
+    return flags;
+  },
+
+  /* Diagram 2 — NI 3/2011 s1.4.10. A registered docket that has not reached a
+     detective within 24 hours is the station commander's problem, not something
+     that quietly waits. */
+  overdueDetectiveHandover(stationId, hours = 24) {
+    const db = read();
+    const cut = Date.now() - hours * 36e5;
+    return db.dockets.filter(d => !d.detective_id &&
+      d.current_status !== 'closed' &&
+      new Date(d.registered_at).getTime() < cut &&
+      (!stationId || d.station_id === stationId));
+  },
 
   /* ----- administration ----- */
   saveUser(payload, actor) {
@@ -789,6 +2091,31 @@ const Store = {
     };
   },
 
+  /* Diagram 4, NI 3/2011 s1.4.3 — dormancy is measured by the investigation
+     diary, not by any activity at all. A docket someone opened, read and
+     closed again has "activity" but no investigation; an entry in the diary is
+     the only thing that shows work was done. */
+  dormantDockets(stationId, days = 30) {
+    const db = read();
+    const cut = Date.now() - days * 864e5;
+    return db.dockets.filter(d => {
+      if (d.current_status === 'closed') return false;
+      if (stationId && d.station_id !== stationId) return false;
+      const entries = db.notes.filter(n => n.docket_id === d.id);
+      const last = entries.length
+        ? Math.max(...entries.map(n => new Date(n.created_at).getTime()))
+        : new Date(d.registered_at).getTime();
+      return last < cut;
+    });
+  },
+
+  /* When a docket last had a diary entry, or null if it never has. */
+  lastDiaryEntry(docketId) {
+    const entries = read().notes.filter(n => n.docket_id === Number(docketId));
+    if (!entries.length) return null;
+    return entries.map(n => n.created_at).sort().slice(-1)[0];
+  },
+
   staleDockets(stationId, days = 30) {
     const db = read();
     const cut = Date.now() - days * 864e5;
@@ -796,6 +2123,30 @@ const Store = {
       (!stationId || d.station_id === stationId) &&
       d.current_status !== 'closed' &&
       new Date(d.last_activity_at).getTime() < cut);
+  },
+
+  /* Decisions a commander declined to sign, counted per official. A single
+     reversal is an ordinary disagreement — two people looked at the same facts
+     and read them differently, which is exactly what the second signature is
+     for. A run of them by one official is a different thing, and it belongs in
+     front of the commander rather than buried in the audit log. */
+  reversalsByOfficer(stationId, threshold = 2) {
+    const db = read();
+    const counts = {};
+    db.refusals
+      .filter(r => r.status === 'rejected' && (!stationId || r.station_id === stationId))
+      .forEach(r => {
+        const id = r.reversed_official_id || r.officer_id;
+        counts[id] = (counts[id] || 0) + 1;
+      });
+    return Object.entries(counts)
+      .map(([id, count]) => ({
+        user_id: Number(id),
+        name: Store.userName(id),
+        count,
+        flagged: count >= threshold
+      }))
+      .sort((a, b) => b.count - a.count);
   },
 
   refusalsByOfficer(stationId) {
@@ -826,6 +2177,90 @@ const Store = {
   complainant(id) { return read().complainants.find(c => c.id === Number(id)); }
 };
 
+/* ---------------- shared docket creation ----------------
+   Used by the ordinary "open a docket" path and by the wrong-jurisdiction
+   transfer, so a docket is registered the same way whichever door it came
+   through, and the case number is issued before anything else happens. */
+function openDocketInternal(db, intake, actor) {
+  const station = db.stations.find(s => s.id === intake.station_id);
+  const cat = db.categories.find(c => c.id === intake.category_id);
+  const now = new Date().toISOString();
+
+  const docket = {
+    id: nextId(db.dockets),
+    cas_number: newCasNumber(db, station.code),
+    intake_id: intake.id,
+    complainant_id: intake.complainant_id,
+    category_id: intake.category_id,
+    station_id: intake.station_id,
+    registered_by: actor.id,
+    current_status: 'registered',
+    registered_at: now,
+    last_activity_at: now,
+    detective_id: null,
+    closure_type: null,
+    brought_forward_at: null,
+    priority: cat ? cat.default_priority : 'Medium'
+  };
+  db.dockets.push(docket);
+
+  intake.disposition = 'docket_opened';
+  intake.disposed_at = now;
+  intake.disposed_by = actor.id;
+  intake.docket_id = docket.id;
+
+  db.status_history.push({ id: nextId(db.status_history), docket_id: docket.id,
+    previous_status: null, new_status: 'registered', changed_by: actor.id,
+    changed_at: now, notes: 'Docket opened from report' });
+
+  logAudit(db, { user_id: actor.id, user_name: actor.name, user_role: actor.role,
+    action_type: 'create', entity_type: 'docket', entity_id: docket.id, case_id: docket.id,
+    description: `Docket opened from ${intake.intake_number}, ${docket.cas_number} issued — priority ${docket.priority} (auto by category)` });
+
+  /* Witnesses the complainant named when reporting are carried onto the docket
+     straight away. Otherwise they live only in the report text, and the
+     closure checklist cannot see that anyone was ever identified. */
+  (intake.witnesses_reported || []).forEach(w => {
+    db.witnesses.push({ id: nextId(db.witnesses), docket_id: docket.id,
+      name: w.name, contact: w.contact, identified_by: actor.id, identified_at: now,
+      statement_text: '', statement_taken_at: null, no_statement_reason: '',
+      reported_by_complainant: true });
+  });
+
+  // FR14 — auto-assign by crime category and lowest caseload
+  const assigned = autoAssign(db, docket);
+  return { docket, assigned };
+}
+
+/* Who took the decision a complainant is escalating about: the official who
+   refused the report, or on a live case the detective holding it, falling back
+   to whoever registered the docket. */
+function decisionMakerFor(db, docketId, intakeId) {
+  if (docketId) {
+    const d = db.dockets.find(x => x.id === Number(docketId));
+    if (d) return d.detective_id || d.registered_by || null;
+  }
+  if (intakeId) {
+    const refusal = db.refusals.find(r => r.intake_id === Number(intakeId) && r.status === 'confirmed');
+    if (refusal) return refusal.officer_id;
+    const intake = db.intakes.find(i => i.id === Number(intakeId));
+    if (intake) return intake.disposed_by || null;
+  }
+  return null;
+}
+
+/* ---------------- complainant notifications ----------------
+   Every terminal state in the activity diagrams ends with the complainant
+   being told. Recording it makes that promise checkable: if the notification
+   is not in this table, it was not sent. */
+function notify(db, intake, message) {
+  const rec = { id: nextId(db.notifications), intake_id: intake.id,
+    docket_id: intake.docket_id || null, message,
+    created_at: new Date().toISOString() };
+  db.notifications.push(rec);
+  return rec;
+}
+
 /* ---------------- routing by incident location ----------------
    No mapping/geocoding service is wired up (this is a client-only prototype),
    so each station lists the suburbs/areas it covers and the incident location
@@ -837,12 +2272,15 @@ function routeByLocation(db, locationText) {
   return match || db.stations[0];
 }
 
-/* Case-sensitive on purpose: the name given when tracking must match the one
-   captured on the report exactly, capitals included. Only whitespace is
-   normalised, because trailing spaces and double spaces are invisible on screen
-   and a complainant could never see what to correct. */
+/* The name given when tracking must match the one captured on the report, but
+   capitals and spacing are not part of that check. A phone keyboard capitalises
+   on its own, and a complainant looking at the screen cannot see that they typed
+   a trailing space or a double space — so those differences lock people out of
+   their own case without telling them what to correct. The reference number is
+   what an outsider would have to guess; the name is a second factor, and
+   requiring it in the right letters adds no protection. */
 function normalizeName(s) {
-  return String(s || '').trim().replace(/\s+/g, ' ');
+  return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /* Shared by the complainant-ID and ID-number lookups: same name check, same
@@ -873,6 +2311,7 @@ function createExhibit(db, docket, actor, payload) {
     description: payload.description, evidence_type: payload.evidence_type,
     collected_by: actor.id, collected_at: new Date().toISOString(),
     current_holder_id: actor.id, storage_location: payload.storage_location || '',
+    saps13_number: (payload.saps13_number || '').trim() || null,
     image_data_url: payload.image_data_url,
     suspect_name: payload.suspect_name || null,
     suspect_id_number: payload.suspect_id_number || null,
@@ -991,16 +2430,7 @@ function seed() {
       { id: 3, name: 'Commercial Crime' },
       { id: 4, name: 'Vehicle Crime' }
     ],
-    categories: [
-      { id: 1, name: 'Theft', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
-      { id: 2, name: 'Common assault', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
-      { id: 3, name: 'Sexual offence', required_specialisation_id: 2, sla_days: 14, default_priority: 'Critical', protected_from_withdrawal: true },
-      { id: 4, name: 'Domestic violence', required_specialisation_id: 2, sla_days: 14, default_priority: 'High', protected_from_withdrawal: true },
-      { id: 5, name: 'Fraud', required_specialisation_id: 3, sla_days: 45, default_priority: 'Medium', protected_from_withdrawal: false },
-      { id: 6, name: 'Vehicle theft', required_specialisation_id: 4, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
-      { id: 7, name: 'Burglary', required_specialisation_id: 1, sla_days: 30, default_priority: 'Medium', protected_from_withdrawal: false },
-      { id: 8, name: 'Malicious damage to property', required_specialisation_id: 1, sla_days: 30, default_priority: 'Low', protected_from_withdrawal: false }
-    ],
+    categories: CATEGORIES.map(c => Object.assign({}, c)),
     users: [
       { id: 1, name: 'Sgt. M. Dlamini', email: 'official@saps.demo', password: 'demo1234',
         role: 'official', rank: 'Sergeant', station_id: 1, specialisation_id: null,
@@ -1026,7 +2456,8 @@ function seed() {
     ],
     complainants: [], intakes: [], dockets: [], refusals: [], escalations: [],
     assignments: [], status_history: [], notes: [], evidence: [], custody: [],
-    arrests: [], handovers: [], audit_log: [], complainant_evidence: [], withdrawals: []
+    arrests: [], handovers: [], audit_log: [], complainant_evidence: [], withdrawals: [],
+    notifications: [], closures: [], transfers: []
   };
 
   /* --- seeded reports --- */
@@ -1124,28 +2555,42 @@ function seed() {
       }
     }
 
+    /* A refusal that has been proposed and signed off by a second person. */
     if (s.action === 'refused') {
       const at = iso(now - (s.age - 1) * 36e5);
       db.refusals.push({ id: nextId(db.refusals), intake_id: intake.id, station_id: station.id,
-        officer_id: 2, reason_category: 'Insufficient evidence',
-        reason_detail: 'Complainant unable to identify either party and no witnesses were present at the time.',
-        refused_at: at, complainant_notified_at: at, reviewed_by: null, reviewed_at: null });
+        officer_id: 2, reason_category: DUPLICATE_REASON,
+        reason_detail: 'The same assault was already reported by the complainant three days earlier under CAS-2026-DBN-000001.',
+        duplicate_of: 'CAS-2026-DBN-000001', status: 'confirmed',
+        raised_at: at, refused_at: at, complainant_notified_at: at,
+        cosigned_by: 1, cosigned_at: at, cosign_note: 'Duplicate verified against the original docket.' });
       intake.disposition = 'refused'; intake.disposed_at = at; intake.disposed_by = 2;
-      logAudit(db, { user_id: 2, user_name: 'Cst. T. Khumalo', user_role: 'official',
+      notify(db, intake, `No docket was opened. Reason: ${DUPLICATE_REASON}.`);
+      logAudit(db, { user_id: 1, user_name: 'Sgt. M. Dlamini', user_role: 'official',
         action_type: 'refusal', entity_type: 'intake', entity_id: intake.id, performed_at: at,
-        description: `Refusal recorded on ${intake.intake_number} — Insufficient evidence` });
+        description: `Refusal on ${intake.intake_number} signed off — ${DUPLICATE_REASON}` });
     }
 
+    /* Wrong jurisdiction: registered here first, then transferred, so the
+       complainant walks away holding a case number either way. */
     if (s.action === 'referred') {
       const at = iso(now - (s.age - 1) * 36e5);
-      db.refusals.push({ id: nextId(db.refusals), intake_id: intake.id, station_id: station.id,
-        officer_id: 2, reason_category: 'Referred — jurisdiction',
-        reason_detail: 'Incident occurred within the Chatsworth policing precinct.',
-        referred_to_station: 'Chatsworth SAPS', refused_at: at, complainant_notified_at: at });
-      intake.disposition = 'referred'; intake.disposed_at = at; intake.disposed_by = 2;
+      const to = db.stations.find(x => x.code === 'PTN');
+      const opened = openDocketInternal(db, intake, { id: 2, name: 'Cst. T. Khumalo', role: 'official' });
+      opened.docket.station_id = to.id;
+      opened.docket.detective_id = null;
+      opened.docket.registered_at = at;
+      opened.docket.last_activity_at = at;
+      db.assignments.filter(a => a.docket_id === opened.docket.id && a.is_active)
+        .forEach(a => { a.is_active = false; a.unassigned_at = at; });
+      db.transfers.push({ id: nextId(db.transfers), docket_id: opened.docket.id,
+        from_station_id: station.id, to_station_id: to.id, transferred_by: 2,
+        transferred_at: at, reason: 'Incident occurred within the Pinetown policing precinct.' });
+      notify(db, intake, `Your case number is ${opened.docket.cas_number}. It was registered at ${station.name} and transferred to ${to.name}.`);
       logAudit(db, { user_id: 2, user_name: 'Cst. T. Khumalo', user_role: 'official',
-        action_type: 'referral', entity_type: 'intake', entity_id: intake.id, performed_at: at,
-        description: `Referred ${intake.intake_number} to Chatsworth SAPS` });
+        action_type: 'transfer', entity_type: 'docket', entity_id: opened.docket.id,
+        case_id: opened.docket.id, performed_at: at,
+        description: `${opened.docket.cas_number} registered at ${station.name} and transferred to ${to.name}` });
     }
   });
 

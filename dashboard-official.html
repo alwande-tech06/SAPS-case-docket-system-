@@ -22,16 +22,23 @@
 
   <div class="grid grid-3" id="tiles"></div>
 
-  <div class="folder" data-tab="Pending queue" style="margin-top:1.6rem">
-    <div class="table-scroll">
-      <table>
-        <thead><tr>
-          <th>Report number</th><th>Received</th><th>Type</th><th>Priority</th><th>Complainant</th>
-          <th>Age</th><th>Channel</th><th>Action</th>
-        </tr></thead>
-        <tbody id="pendingBody"></tbody>
-      </table>
+  <section id="cosign" style="margin-top:1.6rem"></section>
+
+  <div class="queue-split" style="margin-top:1.6rem">
+    <div class="folder" data-tab="Pending queue">
+      <div class="table-scroll">
+        <table>
+          <thead><tr>
+            <th>Report number</th><th>Readiness</th><th>Received</th><th>Type</th><th>Priority</th>
+            <th>Complainant</th><th>Age</th><th>Action</th>
+          </tr></thead>
+          <tbody id="pendingBody"></tbody>
+        </table>
+      </div>
     </div>
+
+    <!-- the selected report's full checklist, without leaving the queue -->
+    <aside class="queue-panel" id="queuePanel"></aside>
   </div>
 
   <div class="folder" data-tab="Disposed today" style="margin-top:2rem">
@@ -43,9 +50,10 @@
     </div>
   </div>
 </main>
-<footer class="foot">Prototype interface — data is stored in this browser only.</footer>
+
 
 <script src="js/store.js"></script>
+<script src="js/rules.js"></script>
 <script src="js/app.js"></script>
 <script src="js/official.js"></script>
 </body>

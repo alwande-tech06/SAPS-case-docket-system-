@@ -23,6 +23,11 @@
     <span class="step" id="s3">3 — Reference</span>
   </div>
 
+  <p class="small" style="margin:-.4rem 0 1rem">
+    Not sure what happens after you report?
+    <a href="what-happens-next.html">Read the guide</a> — the process, what is expected of you, and your rights.
+  </p>
+
   <!-- STEP 1 -->
   <section class="card" id="step1">
     <div class="card-head"><h2>What happened</h2></div>
@@ -30,6 +35,9 @@
       <label for="category">Type of incident <span class="req">*</span></label>
       <select id="category"><option value="">Select a category</option></select>
     </div>
+
+    <!-- the guide's section for the chosen category, collapsed -->
+    <div id="guideForCategory"></div>
     <div class="row row-2">
       <div class="field">
         <label for="idate">Date it happened <span class="req">*</span></label>
@@ -47,8 +55,52 @@
         area based on the suburb or landmark you give. You do not need to work out which station that is.</p>
     </div>
     <div class="field">
-      <label for="description">Describe what happened <span class="req">*</span></label>
-      <textarea id="description" placeholder="What happened, who was involved, and anything that might help identify them."></textarea>
+      <label for="description">Describe what happened, in your own words <span class="req">*</span></label>
+      <textarea id="description" style="min-height:150px" placeholder="What happened, when, who was involved, where it happened, why you think it happened, and how."></textarea>
+      <p class="hint" id="descHint">Cover the <strong>what, when, who, where, why and how</strong> — this is what
+        the sworn statement has to cover, so writing it now means you are not starting from
+        nothing at the station. Use your own words; nothing here has to sound official.</p>
+    </div>
+
+    <!-- filled per category from the category field specification -->
+    <div id="catFields"></div>
+
+    <div class="field">
+      <label for="suspectKnown">Can you identify who did this?</label>
+      <select id="suspectKnown">
+        <option value="no">No — I cannot identify anyone</option>
+        <option value="yes">Yes — I can describe or name someone</option>
+      </select>
+      <p class="hint">Not knowing who did this is never a reason to refuse your case. This is asked
+        only because it helps the investigation if you do know.</p>
+    </div>
+    <div id="suspectBox" hidden>
+      <div class="field">
+        <label for="suspectName">Name or nickname, if you know it</label>
+        <input type="text" id="suspectName">
+      </div>
+      <div class="field">
+        <label for="suspectDesc">Description</label>
+        <textarea id="suspectDesc" placeholder="Appearance, clothing, vehicle, where they might be found."></textarea>
+      </div>
+      <div class="field">
+        <label for="suspectContact">Contact details, if known</label>
+        <input type="text" id="suspectContact" placeholder="Phone number or address">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="witnessKnown">Were there any witnesses?</label>
+      <select id="witnessKnown">
+        <option value="no">No, or I do not know of any</option>
+        <option value="yes">Yes</option>
+      </select>
+    </div>
+    <div id="witnessBox" hidden>
+      <div id="witnessList"></div>
+      <button type="button" class="btn btn-sm" id="addWitnessRow">Add another witness</button>
+      <p class="hint">A statement has to be taken from every witness, or a reason recorded why it
+        could not be. Giving their details now is what makes that possible.</p>
     </div>
     <div class="field">
       <label for="files">Evidence — photos or documents (optional)</label>
@@ -141,15 +193,94 @@
         If no case number is issued within 24 hours, the system notifies you automatically
         and places the report on the station commander's dashboard. You do not have to chase it.
       </div>
+      <div class="notice" style="margin-top:1rem">
+        <strong>What happens now</strong>
+        The full guide sets out what the police must do next, what is expected of you, what
+        the three possible outcomes are, and what to do if nothing happens.
+        <div class="btn-row" style="margin-top:.7rem">
+          <a class="btn btn-primary" href="what-happens-next.html">Read: what happens after you report</a>
+        </div>
+      </div>
       <div class="btn-row">
         <a class="btn btn-primary" href="track.html">Track this report</a>
         <a class="btn" href="index.html">Done</a>
       </div>
     </div>
+
+    <div class="split" style="margin-top:1.4rem">
+      <div class="card">
+        <div class="card-head"><h3>What happens next, and what is expected of you</h3></div>
+        <ol class="timeline" style="list-style:none">
+          <li>
+            <div class="when">Step 1</div>
+            <strong>Go to the station to sign your statement</strong>
+            <p class="small muted">Reporting online starts the process, but the statement has to be
+            sworn and signed in person. Take your ID and your reference number.</p>
+          </li>
+          <li>
+            <div class="when">Step 2</div>
+            <strong>Keep your case number</strong>
+            <p class="small muted">It is sent to you by SMS. You need it to check the case or to
+            escalate it.</p>
+          </li>
+          <li>
+            <div class="when">Step 3</div>
+            <strong>Preserve the evidence</strong>
+            <p class="small muted">Do not clean or repair the scene yet. Keep damaged items,
+            messages and receipts, and upload photographs while things are as they were.</p>
+          </li>
+          <li>
+            <div class="when">Step 4</div>
+            <strong>Be available</strong>
+            <p class="small muted">Answer the investigating officer, and attend identity parades and
+            court when you are asked to.</p>
+          </li>
+          <li>
+            <div class="when">Step 5</div>
+            <strong>Report anything that changes</strong>
+            <p class="small muted">New information, property recovered, or a new contact number —
+            tell the investigating officer or update this case.</p>
+          </li>
+          <li>
+            <div class="when">Step 6</div>
+            <strong>Withdrawal is not only your decision</strong>
+            <p class="small muted">You may ask to withdraw, and a station commander decides on the
+            request. Once the docket is with the prosecutor, whether the case proceeds is the
+            NPA's decision, not yours and not the police's.</p>
+          </li>
+        </ol>
+        <div class="notice notice-alert" id="medicalAdvice" hidden>
+          <strong>Get medical attention as soon as you can</strong>
+          Go to a hospital, clinic or a Thuthuzela Care Centre. If you can, do not wash or change
+          your clothes first — that evidence cannot be recovered later, and it can decide a case.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>What you are entitled to</h3></div>
+        <p class="small muted">From the Service Charter for Victims of Crime. These are rights, not
+        favours, and you can insist on them.</p>
+        <ul class="channel-list">
+          <li><span class="k">Dignity and privacy</span><span>To be treated with courtesy, and to have your case handled privately.</span></li>
+          <li><span class="k">To offer information</span><span>To tell the police what you know, and to have it recorded.</span></li>
+          <li><span class="k">To receive information</span><span>To be told what is happening with your case, and why.</span></li>
+          <li><span class="k">Protection</span><span>To be protected from intimidation for having reported.</span></li>
+          <li><span class="k">Assistance</span><span>To be referred for medical, counselling and support services.</span></li>
+          <li><span class="k">Compensation and restitution</span><span>To ask the court for compensation, or for your property back.</span></li>
+        </ul>
+        <div class="notice notice-alert" style="margin-top:1rem">
+          <strong>If you are not getting anywhere</strong>
+          Escalate in this order — each step is recorded:
+          <ol class="small" style="margin:.5rem 0 0 1.1rem">
+            <li>The station commander — you can do this from your tracking page</li>
+            <li>The National Complaints Centre on <span class="ref">0800 333 177</span></li>
+            <li>IPID, the Independent Police Investigative Directorate, for misconduct by an officer</li>
+          </ol>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
-
-<footer class="foot">Prototype interface — data is stored in this browser only.</footer>
 
 <script src="js/store.js"></script>
 <script src="js/vendor-qrcode.js"></script>

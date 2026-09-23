@@ -516,3 +516,141 @@ input:focus, select:focus, textarea:focus {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- inline guidance ----------
+   The "what happens after you report" guide is a page of its own, but the
+   section for the crime being reported is shown inside the form, collapsed,
+   at the moment the category is chosen. Styled here to match the form rather
+   than the guide, because it appears as part of the form. */
+.guide-inline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+  margin: -.2rem 0 1.1rem;
+}
+.guide-inline > summary {
+  cursor: pointer;
+  padding: .7rem .85rem;
+  font-weight: 600;
+  font-size: .9rem;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .6rem;
+}
+.guide-inline > summary::-webkit-details-marker { display: none; }
+.guide-inline > summary::after { content: "+"; color: var(--accent); font-weight: 700; font-size: 1.1rem; }
+.guide-inline[open] > summary::after { content: "\2013"; }
+.guide-inline[open] > summary { border-bottom: 1px solid var(--border-soft); }
+.guide-inline .guide-body { padding: .2rem .85rem .85rem; font-size: .9rem; }
+.guide-inline .guide-body h4 { margin: .8rem 0 .2rem; font-size: .85rem; color: var(--accent-hover); }
+.guide-inline .guide-body ul { margin: .2rem 0 0; padding-left: 1.1rem; }
+.guide-inline .guide-body li { margin-bottom: .2rem; }
+.guide-inline .guide-body .note {
+  background: var(--brass-wash);
+  border: 1px solid var(--border);
+  color: var(--brass);
+  padding: .55rem .7rem;
+  border-radius: var(--radius-sm);
+  margin-top: .7rem;
+}
+.guide-inline .guide-more { margin-top: .7rem; font-size: .85rem; }
+
+/* ---------- "Why is this blocked?" ----------
+   Deliberately quiet: it sits beside a refusal, and it is an offer of an
+   explanation, not another thing demanding attention. */
+.why {
+  display: inline-block;
+  margin-top: .35rem;
+  font-size: .82rem;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.why::before { content: "\2139"; margin-right: .3rem; text-decoration: none; }
+.why:hover { color: var(--accent-hover); }
+.notice .why { display: block; }
+.tab-help { margin-left: auto; }
+
+/* ---------- readiness checklist ----------
+   Used on the queue's side panel and inside every modal that has to say what
+   is still missing. The mark carries the state, so it reads at a glance
+   without relying on colour alone. */
+.checklist { list-style: none; margin: 0 0 .6rem; padding: 0; }
+.checklist li {
+  display: flex;
+  gap: .55rem;
+  align-items: flex-start;
+  padding: .4rem 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: .88rem;
+}
+.checklist li:last-child { border-bottom: 0; }
+.checklist .mark {
+  flex: 0 0 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .72rem;
+  font-weight: 700;
+  margin-top: .05rem;
+}
+.checklist .is-ok .mark      { background: var(--good-wash);  color: var(--good); }
+.checklist .is-missing .mark { background: var(--alert-wash); color: var(--alert); }
+.checklist .is-note .mark    { background: var(--surface-sunk); color: var(--muted); }
+.checklist .is-missing strong { color: var(--alert); }
+.checklist strong { display: block; font-weight: 600; }
+.checklist .small { display: block; }
+
+/* A button that cannot succeed says so before it is pressed. */
+.btn.is-blocked, .btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  pointer-events: auto;      /* keep the tooltip reachable */
+}
+
+/* ---------- queue with a side panel ---------- */
+.queue-split { display: grid; grid-template-columns: 2fr 1fr; gap: 1.2rem; align-items: start; }
+.queue-panel { position: sticky; top: 1rem; }
+.queue-panel .card { margin-bottom: 0; }
+tr.is-selected > td { background: var(--accent-wash); }
+tbody tr[data-row] { cursor: pointer; }
+@media (max-width: 900px) {
+  .queue-split { grid-template-columns: 1fr; }
+  .queue-panel { position: static; }
+}
+
+/* A way out of a modal that does not compete with the decision. */
+.btn-link {
+  background: none;
+  border: 0;
+  padding: .45rem .2rem;
+  font: inherit;
+  font-size: .85rem;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.btn-link:hover { color: var(--ink); }
+
+/* The two real choices, as a choice rather than as two buttons racing. */
+.decision { display: grid; gap: .5rem; margin: .2rem 0 .9rem; }
+.decision label {
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .65rem .8rem;
+  cursor: pointer;
+  background: var(--surface);
+}
+.decision label:hover { border-color: var(--accent); }
+.decision input { margin-top: .2rem; }
+.decision input:checked + span strong { color: var(--accent); }
+.decision label:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); }
+.decision strong { display: block; font-size: .92rem; }

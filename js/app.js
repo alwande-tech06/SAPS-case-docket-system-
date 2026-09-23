@@ -94,15 +94,24 @@ function openModal(title, bodyHtml, onConfirm, confirmLabel) {
     back.addEventListener('click', e => { if (e.target === back) closeModal(); });
   }
   const modal = back.querySelector('.modal');
+  /* confirmLabel === null means the modal carries its own decision buttons.
+     Adding a third, generic one would make the most prominent control on the
+     screen the one that does nothing. Cancel stays, as a plain link. */
+  const ownButtons = confirmLabel === null;
   modal.innerHTML = `
     <h2>${esc(title)}</h2>
     <div id="modalBody">${bodyHtml}</div>
     <div class="btn-row" style="margin-top:1.1rem">
-      <button class="btn btn-primary" id="modalOk">${esc(confirmLabel || 'Save')}</button>
-      <button class="btn" id="modalCancel">Cancel</button>
+      ${ownButtons ? '' : `<button class="btn btn-primary" id="modalOk">${esc(confirmLabel || 'Save')}</button>`}
+      <button class="${ownButtons ? 'btn-link' : 'btn'}" id="modalCancel">Cancel</button>
     </div>`;
   back.classList.add('open');
   modal.querySelector('#modalCancel').onclick = closeModal;
+  if (ownButtons) {
+    const first = modal.querySelector('#modalBody input, #modalBody select, #modalBody textarea');
+    if (first) first.focus();
+    return;
+  }
   modal.querySelector('#modalOk').onclick = () => {
     const result = onConfirm();
     if (result && typeof result.then === 'function') result.then(r => { if (r !== false) closeModal(); });
@@ -118,6 +127,33 @@ function closeModal() {
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* ---------------- "Why is this blocked?" ----------------
+   Screens never name a guide anchor themselves. They pass the code the data
+   layer returned with its refusal, and the anchor is looked up in the one
+   table in store.js — so the link is always the rule that actually failed,
+   and a new guard needs no change here. */
+const GUIDE_ROLES = ['official', 'detective', 'commander'];
+
+/* The guide always opens in the reader's own section, whoever the rule
+   belongs to. A detective stopped by the separation-of-duties rule lands in
+   the detective guide, and the page reveals that rule with a line saying it is
+   the commander's duty — rather than dropping them into someone else's guide
+   with a "back to dashboard" link that goes to the wrong dashboard. */
+function ruleHref(code) {
+  const rule = Store.ruleFor(code);
+  if (!rule) return null;
+  const s = Store.session();
+  const role = s && GUIDE_ROLES.includes(s.role) ? s.role : rule.role;
+  return `guide.html?role=${role}#${rule.anchor}`;
+}
+
+function whyBlocked(code, label) {
+  const href = ruleHref(code);
+  if (!href) return '';
+  return `<a class="why" href="${href}" target="_blank" rel="noopener">${
+    esc(label || 'Why is this blocked?')}</a>`;
+}
 
 /* ---------------- role guard ---------------- */
 
@@ -176,7 +212,13 @@ function renderChrome(activeHref) {
     if (t.badge === 'withdrawals' && withdrawals) badge = `<span class="count alert">${withdrawals}</span>`;
     const active = t.href === activeHref ? ' is-active' : '';
     return `<a class="tab${active}" href="${t.href}">${esc(t.label)}${badge}</a>`;
-  }).join('');
+  }).join('') +
+  /* The guide opens in its own tab, so nobody loses a half-filled form to
+     check what a rule requires. Admin has no Help item: it is a technical role
+     with no case duties, so the guide has nothing to tell it. */
+  (GUIDE_ROLES.includes(s.role)
+    ? `<a class="tab tab-help" href="guide.html?role=${esc(s.role)}" target="_blank" rel="noopener">Help</a>`
+    : '');
 
   host.innerHTML = `
     <header class="masthead">
@@ -217,6 +259,8 @@ function renderPublicHeader() {
         </div>
         <div class="masthead-spacer"></div>
         <a class="btn btn-sm" href="index.html">Home</a>
+        <a class="btn btn-sm" href="track.html">Track a report</a>
+        <a class="btn btn-sm" href="what-happens-next.html">What happens after you report</a>
         <a class="btn btn-sm" href="login.html">Staff sign in</a>
       </div>
     </header>`;
@@ -310,9 +354,17 @@ function stampBlock(label, number, mark) {
    can be scanned or kept as evidence the report was made. Rendered with the
    vendored qrcode library (js/vendor-qrcode.js) synchronously as inline SVG
    so it inherits the page's colours and scales with its box. */
-function qrBlock(refNumber, caption) {
+/* The QR carries the reference plus the report's random token. The token only
+   makes the link unguessable — landing on it still asks for the ID number on
+   the report and an OTP before anything is shown. */
+function trackUrl(refNumber, token) {
   const path = location.pathname.replace(/[^/]*$/, '');
-  const url = location.origin + path + 'track.html?ref=' + encodeURIComponent(refNumber);
+  return location.origin + path + 'track.html?ref=' + encodeURIComponent(refNumber) +
+    (token ? '&t=' + encodeURIComponent(token) : '');
+}
+
+function qrBlock(refNumber, caption, token) {
+  const url = trackUrl(refNumber, token);
   const qr = qrcode(0, 'M');
   qr.addData(url);
   qr.make();
@@ -331,7 +383,7 @@ function qrBlock(refNumber, caption) {
         '<rect width="' + size + '" height="' + size + '" fill="#fff"/>' +
         '<g fill="#14181F">' + cells + '</g>' +
       '</svg>' +
-      '<div class="qr-caption">' + esc(caption || 'Scan to reopen this report') + '</div>' +
+      '<div class="qr-caption">' + esc(caption || 'Scan to track this report') + '</div>' +
     '</div>';
 }
 

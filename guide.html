@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System guide — Case Docket Accountability System</title>
+<!--
+  USAGE
+  -----
+  guide.html?role=official             Police Official section
+  guide.html?role=detective            Detective section
+  guide.html?role=commander            Station Commander section
+  guide.html?role=<r>&view=rules       Regulations, keeping that reader's context
+  guide.html                           shows a role picker
+
+  A reader only ever sees their own section and the regulations, plus a link
+  back to their dashboard. Admin has no section: it is a technical role with no
+  case duties, so there is nothing for it to be blocked by.
+
+  Deep links for the "Why is this blocked?" helper, e.g.
+  guide.html?role=detective#rule-closure-diary
+  Any element with id starting "rule-" is highlighted when linked to.
+  The dashboards build these links from the blocking code returned by the data
+  layer — see RULE_ANCHORS in js/store.js and whyBlocked() in js/app.js.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  /* Only what this page adds to the system stylesheet: the rule block, which
+     is a card with the weight of the rule carried on its left edge. */
+  .rule {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: .85rem 1rem;
+    margin-bottom: .75rem;
+    box-shadow: var(--shadow);
+    scroll-margin-top: 5.5rem;
+  }
+  .rule h4 { margin: 0 0 .35rem; font-size: .95rem; }
+  .rule p, .rule li { font-size: .9rem; }
+  .rule ul { margin: .35rem 0 0; padding-left: 1.1rem; }
+  .rule li { margin-bottom: .2rem; }
+  .rule .src {
+    display: block;
+    margin-top: .6rem;
+    color: var(--muted-soft);
+    font-size: .8rem;
+  }
+  .rule.no  { border-left-color: var(--alert); }
+  .rule.yes { border-left-color: var(--good); }
+
+  /* Flashes when a "Why is this blocked?" link lands on it. */
+  .rule.flash { animation: rule-flash 2.4s ease-out; }
+  @keyframes rule-flash {
+    0%   { background: var(--brass-wash); border-left-color: var(--brass); }
+    100% { background: var(--surface); }
+  }
+
+  .note {
+    background: var(--brass-wash);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brass);
+    border-radius: var(--radius-sm);
+    padding: .6rem .8rem;
+    font-size: .88rem;
+    margin-top: .7rem;
+  }
+  .elsewhere {
+    background: var(--accent-wash);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: .6rem .8rem;
+    font-size: .88rem;
+    margin-bottom: 1rem;
+  }
+
+  .picker a {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: .85rem 1rem;
+    margin-bottom: .6rem;
+    text-decoration: none;
+    color: var(--ink);
+    box-shadow: var(--shadow);
+  }
+  .picker a:hover { border-color: var(--accent); }
+  .picker a strong { color: var(--accent); }
+
+  section[hidden] { display: none; }
+  main h2 {
+    font-size: 1.05rem;
+    margin: 1.8rem 0 .8rem;
+    padding-bottom: .4rem;
+    border-bottom: 1px solid var(--border);
+  }
+  main h3 { font-size: .95rem; margin: 1.3rem 0 .5rem; }
+  pre {
+    background: var(--ink);
+    color: var(--surface);
+    padding: .9rem;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: .8rem;
+  }
+  code {
+    background: var(--surface-sunk);
+    border: 1px solid var(--border-soft);
+    padding: .05rem .3rem;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: .82rem;
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="crest">SAPS</div>
+    <div>
+      <div class="masthead-title">System guide</div>
+      <div class="masthead-sub">What the system requires, and why</div>
+    </div>
+    <div class="masthead-spacer"></div>
+    <a class="btn btn-sm" id="backLink" href="login.html" hidden>Back to dashboard</a>
+  </div>
+</header>
+
+<nav class="tabs"><div class="tabs-inner" id="tabs"></div></nav>
+
+<main class="wrap">
+  <div class="page-head">
+    <p class="eyebrow">Staff guide</p>
+    <h1 id="pageTitle">System guide</h1>
+  </div>
+
+<!-- ============================ ROLE PICKER ============================ -->
+<section id="sec-picker">
+  <h2>Choose your role</h2>
+  <div class="picker">
+    <a href="?role=official"><strong>Police Official</strong><br>
+      <span class="muted">Capturing reports, opening dockets, recording decisions</span></a>
+    <a href="?role=detective"><strong>Detective</strong><br>
+      <span class="muted">Investigating, exhibits, requesting closure</span></a>
+    <a href="?role=commander"><strong>Station Commander</strong><br>
+      <span class="muted">Co-signing, allocating, approving, oversight</span></a>
+    <a href="?role=rules"><strong>Regulations</strong><br>
+      <span class="muted">The sources every rule in this system comes from</span></a>
+  </div>
+</section>
+
+<!-- ============================ POLICE OFFICIAL ============================ -->
+<section id="sec-official" hidden>
+  <h2>Deciding on a report</h2>
+  <p>Every report routed to this station must end in exactly one outcome: a docket is
+     opened, the report is registered and transferred, or a no-docket decision is recorded
+     with reasons. There is no other way to clear a report from the queue.</p>
+
+  <h3>The test you apply</h3>
+  <div class="rule" id="rule-crime-test">
+    <h4>Only two questions are asked at intake</h4>
+    <p><strong>Legality:</strong> is the conduct defined as a crime by statute or common law?<br>
+       <strong>Conduct:</strong> is an act or omission alleged?</p>
+    <p>If both are yes, open a docket. Unlawfulness and culpability are not tested here.
+       Defences are raised by an accused and must be disproved by the state, which is work
+       for the investigation and the court, not the service counter.</p>
+    <span class="src">Four general elements of an offence; NI 3/2011 s1(a), Crime Definitions Manual</span>
+  </div>
+
+  <h3>Grounds that are never valid</h3>
+  <div class="rule no" id="rule-invalid-grounds">
+    <h4>A report may not be turned away because</h4>
+    <ul>
+      <li>the complainant cannot name the suspect;</li>
+      <li>the complainant did not bring the suspect to the station;</li>
+      <li>the incident happened in another station's area;</li>
+      <li>the official considers the matter not serious enough;</li>
+      <li>the complainant is told to resolve it with the suspect.</li>
+    </ul>
+    <span class="src">NI 3/2011; non-compliance is subject to disciplinary steps</span>
+  </div>
+
+  <h3>Before any decision</h3>
+  <div class="rule" id="rule-intake-preconditions">
+    <h4>Completion checks</h4>
+    <ul>
+      <li>Complainant name, valid 13-digit ID number and contact number.</li>
+      <li>Contact number verified by OTP.</li>
+      <li>Statement covering what, when, who, where, why and how.</li>
+      <li>Incident date, approximate time and location.</li>
+      <li>Crime category selected.</li>
+    </ul>
+    <p>A gap here means more work is needed, never that the report may be cleared.</p>
+    <span class="src">NI 3/2011 s1(a)</span>
+  </div>
+
+  <h3>Outcome 1 — Open a docket</h3>
+  <div class="rule yes" id="rule-open-docket">
+    <h4>Requirements</h4>
+    <ul>
+      <li>Completion checks passed.</li>
+      <li>Crime definition matched and its reference stored.</li>
+      <li>Station area resolved. An unresolved area defaults to this station and flags a
+          transfer; it never blocks the docket.</li>
+    </ul>
+    <p>On submit the system registers the docket, notifies the complainant of the case
+       number, and starts the 24-hour handover timer to the detective service.</p>
+    <span class="src">NI 3/2011 s1(b), s1.4.10</span>
+  </div>
+
+  <h3>Outcome 2 — Register and transfer</h3>
+  <div class="rule yes" id="rule-transfer">
+    <h4>Requirements</h4>
+    <ul>
+      <li>The docket must exist first; if it does not, the system registers it before transferring.</li>
+      <li>Receiving station or specialised unit selected.</li>
+      <li>Reason captured: out of area, or specialised unit.</li>
+      <li>Complainant notified of where the case went.</li>
+    </ul>
+    <p>The complainant is never sent to another station to report again.</p>
+    <span class="src">NI 3/2011 s2</span>
+  </div>
+
+  <h3>Outcome 3 — No docket opened</h3>
+  <p>Three grounds only. Each has its own requirements.</p>
+
+  <div class="rule" id="rule-no-offence">
+    <h4>No offence disclosed</h4>
+    <ul>
+      <li>Name the missing element: legality or conduct.</li>
+      <li>Record the crime definition consulted.</li>
+      <li>Write full reasons explaining why the facts do not match the definition.</li>
+      <li>Station Commander co-sign, by someone other than the deciding official.</li>
+      <li>Complainant notified with reasons and escalation options.</li>
+    </ul>
+    <p>Typical example: a purely civil matter such as an unpaid private loan with no
+       misrepresentation.</p>
+    <span class="src">Four elements of an offence; NI 3/2011; Victims' Charter (2004)</span>
+  </div>
+
+  <div class="rule" id="rule-duplicate">
+    <h4>Duplicate of an existing report</h4>
+    <ul>
+      <li>Existing case number entered, and it must resolve to a real docket.</li>
+      <li>Same incident confirmed against date and location.</li>
+      <li>The new statement is attached to the existing docket automatically.</li>
+      <li>Complainant told the existing case number and who is investigating.</li>
+    </ul>
+    <p>No co-sign is required, because nothing is being refused.</p>
+  </div>
+
+  <div class="rule" id="rule-declined-charge">
+    <h4>Complainant declined to lay a charge</h4>
+    <ul>
+      <li>Must be initiated by the complainant. The option stays disabled otherwise.</li>
+      <li>Signed declaration uploaded.</li>
+      <li>Fresh OTP confirmation from the complainant.</li>
+      <li>Official confirms the complainant was told they may lay the charge later.</li>
+    </ul>
+    <p>An official may never select this on a complainant's behalf.</p>
+  </div>
+
+  <div class="rule no" id="rule-insufficient-at-intake">
+    <h4>Why "insufficient evidence" is not on this screen</h4>
+    <p>A complainant's statement and personal details are themselves evidence. Whether
+       evidence is sufficient is determined after an investigation, and the decision to
+       prosecute belongs to the National Prosecuting Authority. This ground is available
+       only at closure, and only once the docket status is <em>Under investigation</em>.
+       The server rejects the value at intake.</p>
+    <span class="src">NI 3/2011; NI 13/2017</span>
+  </div>
+
+  <div class="rule no" id="rule-protected-categories">
+    <h4>Domestic violence and sexual offences</h4>
+    <p>No no-docket ground is available for these categories except a verified duplicate.
+       Additional duties apply, including informing the complainant of the right to apply
+       for a protection order.</p>
+    <span class="src">Domestic Violence Act obligations; NI 3/2011</span>
+  </div>
+
+  <div class="note">Every decision is permanent, attributed to you, logged, and visible on
+    the Station Commander's dashboard immediately.</div>
+</section>
+
+<!-- ============================ DETECTIVE ============================ -->
+<section id="sec-detective" hidden>
+  <h2>Investigating and closing a docket</h2>
+
+  <h3>On receiving a docket</h3>
+  <div class="rule" id="rule-docket-receipt">
+    <h4>Acknowledge and check</h4>
+    <ul>
+      <li>Acknowledge receipt on the system.</li>
+      <li>Confirm the commander's instructions are in the investigation diary.</li>
+      <li>Confirm the docket contents: statement, complainant details, category, priority.</li>
+    </ul>
+    <p>A docket that arrives without diary instructions is flagged back to the commander.</p>
+    <span class="src">NI 3/2011 s1.4.2, s1.4.3</span>
+  </div>
+
+  <h3>While the investigation runs</h3>
+  <div class="rule" id="rule-diary">
+    <h4>Investigation diary</h4>
+    <p>An entry is required within the set interval, shorter for Tier 1 dockets. A missed
+       interval flags the docket as dormant on the commander's dashboard, and open
+       instructions block a closure request.</p>
+    <span class="src">NI 3/2011 s1.4.3</span>
+  </div>
+
+  <div class="rule" id="rule-complainant-updates">
+    <h4>Keeping the complainant informed</h4>
+    <p>The complainant must receive progress updates and be told of any change of
+       investigating officer. This is their right, not a courtesy.</p>
+    <span class="src">Service Charter for Victims of Crime (2004)</span>
+  </div>
+
+  <div class="rule" id="rule-witnesses">
+    <h4>Witnesses</h4>
+    <p>Every identified witness needs a statement, or a recorded reason why one could not
+       be taken. "No witnesses came forward" must be evidenced by the attempts recorded.</p>
+  </div>
+
+  <h3>Exhibits</h3>
+  <div class="rule" id="rule-exhibit">
+    <h4>An exhibit cannot be saved without</h4>
+    <ul>
+      <li>at least one photograph;</li>
+      <li>a link to the docket, and to the suspect's ID number where a suspect exists;</li>
+      <li>storage location and SAPS 13 register number;</li>
+      <li>description, quantity and condition.</li>
+    </ul>
+    <p>Every later movement is logged with who, when and where, in an append-only trail.
+       Injury photographs and the medical report attach to the docket, not the exhibit
+       register.</p>
+    <span class="src">Chain of custody; project design decision</span>
+  </div>
+
+  <h3>Requesting closure</h3>
+  <div class="rule" id="rule-closure-request">
+    <h4>You may only request; the commander approves</h4>
+    <p>The approver can never be the requesting detective.</p>
+  </div>
+
+  <div class="rule no" id="rule-closure-status">
+    <h4>Status must be Under investigation</h4>
+    <p>A docket cannot be closed before it has been investigated. This is why
+       "insufficient evidence" does not exist at intake.</p>
+    <span class="src">NI 13/2017</span>
+  </div>
+
+  <div class="rule no" id="rule-closure-diary">
+    <h4>All diary instructions must be closed out</h4>
+    <p>Each instruction written by the commander must be marked done or explained. Open
+       instructions block the request.</p>
+    <span class="src">NI 3/2011 s1.4.3; NI 13/2017</span>
+  </div>
+
+  <div class="rule no" id="rule-closure-evidence">
+    <h4>Evidence must be accounted for</h4>
+    <ul>
+      <li>Complainant and witness statements present, or reasons recorded.</li>
+      <li>Forensic results received or accounted for.</li>
+      <li>Exhibits registered with an intact custody trail.</li>
+      <li>Suspect or property circulated where outstanding.</li>
+    </ul>
+    <span class="src">NI 13/2017: all possible sources of information explored</span>
+  </div>
+
+  <div class="rule" id="rule-filing-categories">
+    <h4>Each filing category has its own requirement</h4>
+    <div class="table-scroll"><table>
+      <tr><th>Category</th><th>Requires</th></tr>
+      <tr><td>Undetected / insufficient evidence</td><td>Diary entries and evidence documents; a 12-month review date is set automatically</td></tr>
+      <tr><td>Filed pending arrest</td><td>A circulated warrant of arrest</td></tr>
+      <tr><td>Filed pending recovery</td><td>A property circulation reference</td></tr>
+      <tr><td>Withdrawn by complainant</td><td>Complainant-initiated, OTP-confirmed, signed statement</td></tr>
+      <tr><td>Evidence missing or compromised</td><td>Discrepancy report and custody log entry; raises a supervisor alert</td></tr>
+      <tr><td>Sent to court</td><td>Prosecutor reference captured</td></tr>
+    </table></div>
+    <span class="src">NI 13/2017</span>
+  </div>
+
+  <div class="rule no" id="rule-withdrawal">
+    <h4>Withdrawal is the complainant's act, not yours</h4>
+    <p>You cannot record a withdrawal on a complainant's behalf. Once the docket is with
+       the prosecutor, the decision to proceed belongs to the NPA.</p>
+  </div>
+
+  <h3>Reassignment and reopening</h3>
+  <div class="rule" id="rule-reassign-request">
+    <h4>Requesting a handover</h4>
+    <p>Choose a reason from the list: extended sick leave, suspension or discipline,
+       caseload, needs a more experienced detective, urgency, or other with detail. Only
+       the Station Commander can action it, and the complainant is notified.</p>
+  </div>
+
+  <div class="rule" id="rule-reopen">
+    <h4>Reopening</h4>
+    <p>A manual reopen requires new evidence to be uploaded first. Reopens triggered by an
+       arrest, a property recovery or a forensic match happen automatically and return to
+       your queue.</p>
+    <span class="src">NI 13/2017</span>
+  </div>
+</section>
+
+<!-- ============================ STATION COMMANDER ============================ -->
+<section id="sec-commander" hidden>
+  <h2>Approving, allocating and overseeing</h2>
+  <div class="note">In this system the Station Commander also performs the allocation duty
+    that NI 3/2011 s1.4.4 assigns to the Detective Service Centre Commander. The separation
+    rules below exist so that combining the roles does not create a single point of
+    capture.</div>
+
+  <h3>Co-signing a no-docket decision</h3>
+  <div class="rule" id="rule-cosign">
+    <h4>What you are confirming</h4>
+    <ul>
+      <li>The ground is one of the three valid ones.</li>
+      <li>For "no offence disclosed": the missing element is named and the reasons hold up
+          against the crime definition.</li>
+      <li>For a duplicate: the existing case number resolves and the incident matches.</li>
+      <li>For a declined charge: the complainant initiated it, with a signed statement and OTP.</li>
+      <li>You are not the official who made the decision.</li>
+    </ul>
+    <p>If it does not hold up, reject it. The report returns to the queue and a docket must
+       be opened.</p>
+    <span class="src">NI 3/2011; four elements of an offence</span>
+  </div>
+
+  <h3>Allocation</h3>
+  <div class="rule" id="rule-allocation">
+    <h4>Requirements</h4>
+    <ul>
+      <li>Dockets requiring investigation reach the detective service within 24 hours.</li>
+      <li>Inspect the docket personally and write instructions in the investigation diary.</li>
+      <li>Tier 1 dockets (murder, rape, child-related) go to a detective cleared for serious
+          crime, and priority is computed by the system, not typed.</li>
+      <li>Caseload above the threshold requires an override reason.</li>
+    </ul>
+    <span class="src">NI 3/2011 s1.4.3, s1.4.4, s1.4.10</span>
+  </div>
+
+  <div class="rule" id="rule-reassign">
+    <h4>Reassignment</h4>
+    <ul>
+      <li>A reason from the fixed list is required, with detail.</li>
+      <li>The complainant is notified that the investigating officer changed.</li>
+      <li>Repeat reassignments away from one detective, or a pattern by one actor, are
+          flagged on the oversight report.</li>
+    </ul>
+    <span class="src">Discipline Regulations 2016, reg 5(3)(g), 5(3)(q)</span>
+  </div>
+
+  <div class="rule no" id="rule-separation">
+    <h4>Separation of duties</h4>
+    <p>If you approved a closure on a docket, you cannot also reassign on that docket. The
+       request routes to the cluster commander instead. An escalation about your decision
+       never returns to you.</p>
+    <span class="src">Project design decision, addressing single-point-of-capture risk</span>
+  </div>
+
+  <h3>Filing a docket</h3>
+  <div class="rule" id="rule-approve-closure">
+    <h4>Your basis for approving</h4>
+    <p>You are not exercising a discretion to close a case. You are verifying that the
+       docket was properly investigated and falls within a prescribed filing category.</p>
+    <ul>
+      <li>Every diary instruction executed or explained.</li>
+      <li>Complainant and witness statements present.</li>
+      <li>Forensic evidence submitted, with results back or accounted for.</li>
+      <li>Exhibits registered with an intact chain of custody.</li>
+      <li>Circulation done where a suspect or property is outstanding.</li>
+      <li>The requesting detective is not you.</li>
+      <li>The complainant is notified of the outcome and reason.</li>
+    </ul>
+    <p>Filing is not the end. Pending-arrest and pending-recovery dockets reopen
+       automatically, undetected dockets go onto the brought-forward system, and
+       insufficient-evidence dockets are reviewed every twelve months.</p>
+    <span class="src">NI 13/2017; NI 3/2011 s1.4.1, s1.4.3</span>
+  </div>
+
+  <h3>Oversight flags and what to do about them</h3>
+  <div class="rule" id="rule-oversight">
+    <div class="table-scroll"><table>
+      <tr><th>Flag</th><th>What it may indicate</th><th>Action</th></tr>
+      <tr><td>Report cleared without a docket where a crime was disclosed</td>
+          <td>Breach of a legal obligation, or neglect of duty</td>
+          <td>Reverse the decision, open the docket, consider discipline</td></tr>
+      <tr><td>Repeat refusals or closures involving the same complainant or suspect</td>
+          <td>Possible reward for failing to discharge a function</td>
+          <td>Refer for investigation; the investigator must be of equal or higher rank</td></tr>
+      <tr><td>Closure attempted without required attachments</td>
+          <td>Attempt to file a record improperly</td>
+          <td>Review the attempt log with the detective</td></tr>
+      <tr><td>Dormant dockets by detective</td>
+          <td>Caseload or performance problem</td>
+          <td>Reallocate, or address through supervision</td></tr>
+      <tr><td>Colleague misconduct reported in-system</td>
+          <td>Failure to report is itself misconduct</td>
+          <td>Act on the report and record the outcome</td></tr>
+    </table></div>
+    <span class="src">Discipline Regulations 2016, reg 5(3)(a), (g), (q), (bb), (gg), (jj);
+      reg 4(i); SAPS Act 68/1995; IPID Act 1/2011</span>
+  </div>
+
+  <div class="rule" id="rule-escalations">
+    <h4>Escalations</h4>
+    <p>Complainant escalations must be reviewed within the SLA. An unresolved escalation
+       routes to cluster or provincial level and surfaces the National Complaints Centre
+       and IPID contact details to the complainant.</p>
+    <span class="src">IPID Act 1 of 2011</span>
+  </div>
+</section>
+
+<!-- ============================ REGULATIONS ============================ -->
+<section id="sec-rules" hidden>
+  <h2>Where these rules come from</h2>
+  <div class="card">
+    <div class="table-scroll"><table>
+      <tr><th>Source</th><th>What it governs here</th></tr>
+      <tr><td>Constitution of the RSA, 1996, s205(3)</td>
+          <td>The objects of the police: prevent, combat and investigate crime, maintain
+              public order, protect and secure the inhabitants, uphold and enforce the law</td></tr>
+      <tr><td>SAPS Act 68 of 1995, s13</td>
+          <td>A member performs the duties conferred by law, and performs an official duty
+              in a manner that is reasonable in the circumstances</td></tr>
+      <tr><td>National Instruction 3 of 2011</td>
+          <td>Registration of case dockets on CAS: interview, affidavit, open the docket,
+              no referral to another station, handover to the detective service within 24
+              hours, allocation and diary instructions by the detective commander</td></tr>
+      <tr><td>National Instruction 13 of 2017</td>
+          <td>Case docket management: investigation, filing categories, brought-forward
+              reviews and automatic reopening</td></tr>
+      <tr><td>National Instruction 13 of 2016</td>
+          <td>Duties of a station commander</td></tr>
+      <tr><td>Service Charter for Victims of Crime (2004)</td>
+          <td>Seven rights, including the right to receive information about the case and
+              to ask for reasons for a decision not to prosecute</td></tr>
+      <tr><td>SAPS Discipline Regulations, 2016 (GN R1361)</td>
+          <td>Misconduct under reg 5(3), including (a) breach of a legal obligation,
+              (g) prejudicing efficiency, (q) reward for failing to discharge a function,
+              (bb) falsifying records, (gg) neglect of duty, (jj) failing to report
+              misconduct; reg 5(4) fast-tracks bribery, corruption and defeating the course
+              of justice</td></tr>
+      <tr><td>IPID Act 1 of 2011</td>
+          <td>External investigation of serious police misconduct</td></tr>
+      <tr><td>General elements of an offence</td>
+          <td>Legality, conduct, unlawfulness and culpability; only the first two are
+              testable at intake</td></tr>
+    </table></div>
+    <p class="muted">National Instructions are internal SAPS documents. Where a clause could
+      not be verified against a published text, the rule is marked in this guide as a
+      project design decision rather than a quoted instruction.</p>
+  </div>
+</section>
+
+<!-- ============================ DASHBOARD SNIPPET ============================ -->
+<section id="sec-snippet" hidden>
+  <h2>Dashboard helper snippet</h2>
+  <p>Add this next to any disabled button so the user can see which rule is blocking it.</p>
+  <pre>&lt;button disabled&gt;Request closure&lt;/button&gt;
+&lt;a class="why" href="guide.html?role=detective#rule-closure-diary" target="_blank"&gt;
+  Why is this blocked?
+&lt;/a&gt;</pre>
+  <p>In this system the dashboards do not hard-code that anchor. The data layer returns a
+     blocking <code>code</code> on the validation result, and <code>whyBlocked(code)</code>
+     in <code>js/app.js</code> maps the code to the anchor through
+     <code>RULE_ANCHORS</code> in <code>js/store.js</code>, so the link always points at
+     the rule that actually failed.</p>
+</section>
+
+</main>
+
+<footer class="foot">
+  This guide records how the system applies published rules. It is not legal advice.
+  Case Docket Accountability System.
+</footer>
+
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var STAFF = {
+    official:  { label: 'Police Official',   dash: 'dashboard-official.html' },
+    detective: { label: 'Detective',         dash: 'dashboard-detective.html' },
+    commander: { label: 'Station Commander', dash: 'dashboard-commander.html' }
+  };
+
+  // ?role= is who is reading. ?view=rules opens the Regulations tab without
+  // losing that, so the back link still knows where to send them.
+  var role = params.get('role');
+  var view = params.get('view');
+  if (role === 'rules') { view = 'rules'; role = params.get('from'); }   // older links
+  if (!STAFF[role]) role = null;
+
+  // Only this reader's section and the regulations are ever offered. Nobody
+  // needs a tab bar of other people's duties to scroll past.
+  var tabs = document.getElementById('tabs');
+  var back = document.getElementById('backLink');
+
+  if (role) {
+    var q = '?role=' + role;
+    tabs.innerHTML =
+      '<a class="tab' + (view === 'rules' ? '' : ' is-active') + '" href="' + q + '">' +
+        STAFF[role].label + '</a>' +
+      '<a class="tab' + (view === 'rules' ? ' is-active' : '') + '" href="' + q + '&view=rules">' +
+        'Regulations</a>';
+    back.href = STAFF[role].dash;
+    back.hidden = false;
+  } else {
+    // No role: the picker, so the page is still usable opened on its own.
+    tabs.innerHTML =
+      '<a class="tab" href="?role=official">Police Official</a>' +
+      '<a class="tab" href="?role=detective">Detective</a>' +
+      '<a class="tab" href="?role=commander">Station Commander</a>' +
+      '<a class="tab' + (view === 'rules' ? ' is-active' : '') + '" href="?view=rules">Regulations</a>';
+  }
+
+  var title = document.getElementById('pageTitle');
+  if (view === 'rules') title.textContent = 'Regulations';
+  else if (role) title.textContent = STAFF[role].label + ' — system guide';
+
+  function show(id) {
+    var el = document.getElementById(id);
+    if (el) el.hidden = false;
+  }
+  document.getElementById('sec-picker').hidden = true;
+  if (view === 'rules') show('sec-rules');
+  else if (role) show('sec-' + role);
+  else { show('sec-picker'); show('sec-snippet'); }
+
+  // Highlight the rule a "Why is this blocked?" link points at. A rule can
+  // live in another role's section — separation of duties is written up under
+  // the commander, but a detective can be stopped by it — so that section is
+  // revealed, with a line saying whose duty it is.
+  function flashTarget() {
+    var id = location.hash.slice(1);
+    if (!id) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+
+    var section = el.closest('section');
+    if (section && section.hidden) {
+      section.hidden = false;
+      var owner = (section.id || '').replace('sec-', '');
+      if (STAFF[owner] && owner !== role && !section.querySelector('.elsewhere')) {
+        var note = document.createElement('div');
+        note.className = 'elsewhere';
+        note.textContent = 'This rule is written up under the ' + STAFF[owner].label +
+          ', because that is whose duty it is. It is shown here because it is what stopped you.';
+        section.insertBefore(note, section.firstChild);
+      }
+    }
+    el.classList.remove('flash');
+    void el.offsetWidth;           // restart the animation
+    el.classList.add('flash');
+    if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  window.addEventListener('hashchange', flashTarget);
+  if (location.hash) setTimeout(flashTarget, 60);
+})();
+</script>
+
+</body>
+</html>

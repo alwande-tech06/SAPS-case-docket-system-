@@ -2,13 +2,141 @@
 
 renderPublicHeader();
 
+/* A browser that refuses site data still shows every screen, but a report filed
+   now will be gone on the next visit. Say so rather than letting someone trust
+   a reference number that will not be there tomorrow. */
+if (!Store.storageWorks()) {
+  document.getElementById('lookupError').innerHTML =
+    `<div class="notice notice-alert"><strong>This browser is not keeping your data</strong>
+      Reports filed in this browser will not be saved. Allow site data for this page, or open
+      it over http:// rather than as a file, then report again.</div>`;
+}
+
 let current = null;
 
-/* a QR code scanned from a report receipt links here with ?ref=... */
-const prefillRef = new URLSearchParams(location.search).get('ref');
-if (prefillRef) {
+/* ---------------- arriving from a scanned QR code ----------------
+   The link carries the reference and the report's random token. The token only
+   makes the URL unguessable — it is not a credential. A printed slip can be
+   lost, photographed or picked up by somebody else, and what is behind it is
+   private under the Victims' Charter. So the link identifies the report, and
+   the person still has to prove they are the complainant: the ID number given
+   when reporting, then a one-time code to the number on the report. */
+const params = new URLSearchParams(location.search);
+const prefillRef = params.get('ref');
+const linkToken = params.get('t');
+
+if (prefillRef && linkToken) {
+  startLinkVerification(prefillRef, linkToken);
+} else if (prefillRef) {
   document.getElementById('ref').value = prefillRef;
   document.getElementById('fullname').focus();
+}
+
+function startLinkVerification(ref, token) {
+  const check = Store.trackLinkCheck(ref, token);
+  const host = document.getElementById('result');
+  const lookup = document.getElementById('lookup');
+
+  if (!check.ok) {
+    /* Deliberately the same message whether the reference is unknown or the
+       token is wrong, so the page cannot be used to confirm that a reference
+       exists. */
+    document.getElementById('lookupError').innerHTML = `
+      <div class="notice notice-alert">
+        <strong>This link cannot be opened</strong>
+        It may have been mistyped, or it may belong to a report that is no longer on this
+        system. You can still look your report up below.
+      </div>`;
+    return;
+  }
+
+  Store.logTrackLinkAccess(check.intake_id, 'opened, verification started');
+  lookup.hidden = true;
+  host.hidden = false;
+  let otp = null;
+
+  function drawIdStep(error) {
+    host.innerHTML = `
+      <div class="card">
+        <div class="card-head"><h2>Check it is you</h2></div>
+        <p class="small muted">This link opens a specific report. Before anything is shown, we
+        confirm you are the person who made it — a printed slip can be lost or photographed,
+        and what is in your case is private.</p>
+        ${error ? `<div class="notice notice-alert"><strong>That did not match</strong>${esc(error)}</div>` : ''}
+        <div class="field">
+          <label for="linkId">The ID number you gave when you reported <span class="req">*</span></label>
+          <input type="text" id="linkId" inputmode="numeric" maxlength="13" placeholder="13 digits">
+          ${check.id_hint ? `<p class="hint">It ends in ${esc(check.id_hint)}.</p>` : ''}
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="linkIdGo">Continue</button>
+          <a class="btn" href="track.html">Look up a different report</a>
+        </div>
+      </div>`;
+    const go = document.getElementById('linkIdGo');
+    const input = document.getElementById('linkId');
+    input.focus();
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
+    go.onclick = () => {
+      const res = Store.verifyTrackIdNumber(check.intake_id, input.value);
+      if (!res.ok) {
+        Store.logTrackLinkAccess(check.intake_id, 'ID number did not match');
+        drawIdStep('That is not the ID number recorded on this report.');
+        return;
+      }
+      otp = String(Math.floor(100000 + Math.random() * 900000));
+      drawOtpStep(res, null);
+    };
+  }
+
+  function drawOtpStep(person, error) {
+    host.innerHTML = `
+      <div class="card">
+        <div class="card-head"><h2>Enter the code we sent you</h2></div>
+        <div class="notice">
+          <strong>Code sent to the number on this report</strong>
+          In the finished system this arrives by SMS. For this prototype it is shown here:
+          <span class="ref">${esc(otp)}</span>
+        </div>
+        ${error ? `<div class="notice notice-alert"><strong>That code did not match</strong>${esc(error)}</div>` : ''}
+        <div class="field">
+          <label for="linkOtp">Six-digit code <span class="req">*</span></label>
+          <input type="text" id="linkOtp" inputmode="numeric" maxlength="6" placeholder="000000">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="linkOtpGo">Show my report</button>
+          <a class="btn" href="track.html">Cancel</a>
+        </div>
+      </div>`;
+    const go = document.getElementById('linkOtpGo');
+    const input = document.getElementById('linkOtp');
+    input.focus();
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
+    go.onclick = () => {
+      if (input.value.trim() !== otp) {
+        Store.logTrackLinkAccess(check.intake_id, 'one-time code did not match');
+        drawOtpStep(person, 'Check the code and try again.');
+        return;
+      }
+      /* Verified. From here it is the ordinary tracking view, opened through
+         the same Store.track() everything else uses. */
+      Store.logTrackLinkAccess(check.intake_id, 'verified, report shown');
+      document.getElementById('ref').value = prefillRef;
+      document.getElementById('fullname').value = person.name;
+      lookup.hidden = false;
+      const res = Store.track(prefillRef, person.name);
+      if (!res.ok) {
+        host.innerHTML = '';
+        document.getElementById('lookupError').innerHTML =
+          '<div class="notice notice-alert"><strong>No report found</strong>Look it up below.</div>';
+        return;
+      }
+      current = res;
+      render(res);
+    };
+  }
+
+  drawIdStep(null);
 }
 
 document.getElementById('find').onclick = doLookup;
@@ -16,6 +144,22 @@ document.getElementById('ref').addEventListener('keydown', e => { if (e.key === 
 document.getElementById('fullname').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
 
 function doLookup() {
+  /* Whatever goes wrong, the complainant must see something happen. An
+     unhandled error here leaves the button looking dead, which reads as the
+     system ignoring them. */
+  try {
+    runLookup();
+  } catch (e) {
+    console.error(e);
+    document.getElementById('result').hidden = true;
+    document.getElementById('lookupError').innerHTML =
+      `<div class="notice notice-alert"><strong>Something went wrong on this page</strong>
+        Your report has not been lost. Reload the page and try again, or take your reference
+        number to the station.</div>`;
+  }
+}
+
+function runLookup() {
   const ref = document.getElementById('ref').value.trim();
   const fullname = document.getElementById('fullname').value.trim();
   const box = document.getElementById('lookupError');
@@ -112,6 +256,12 @@ function render(res) {
         ? `Referred to ${res.refusal.referred_to_station}`
         : `Docket not opened — ${res.refusal.reason_category}` });
   }
+  /* Every diagram ends with the complainant being told something. Those
+     messages are recorded, so they belong on the complainant's own timeline
+     rather than only in the audit log. */
+  (Store.notifications(i.id) || []).forEach(n =>
+    events.push({ at: n.created_at, text: n.message }));
+
   res.escalations.forEach(e => {
     events.push({ at: e.raised_at, text: e.raised_by_complainant
       ? 'You escalated this case to the station commander'
@@ -127,7 +277,7 @@ function render(res) {
   host.innerHTML = `
     <div class="evidence-row">
       ${stampBlock(d ? 'Case number' : 'Report reference', ref, d ? 'Registered' : 'Pending')}
-      ${qrBlock(ref, 'Scan to reopen this case')}
+      ${qrBlock(ref, 'Scan to track this case', i.track_token)}
     </div>
 
     <div class="card" style="margin-top:1rem">
@@ -187,6 +337,19 @@ function render(res) {
       `}
     </div>
 
+    ${d && d.current_status === 'closed' ? `
+    <div class="card" style="margin-top:1rem">
+      <div class="card-head"><h3>Something new about this case?</h3></div>
+      <p class="small muted">This case has been filed: ${esc(d.closure_type || '—')}. If something
+      new has come to light — a witness, a document, property found — it can be reopened. New
+      evidence or new information is what reopens it, not a change of mind.</p>
+      <div class="field">
+        <label for="reopenText">What is new? <span class="req">*</span></label>
+        <textarea id="reopenText" style="min-height:80px" placeholder="Describe what has changed since the case was filed."></textarea>
+      </div>
+      <button class="btn btn-danger" id="requestReopen">Ask for this case to be reopened</button>
+    </div>` : ''}
+
     ${renderWithdrawalCard(i)}`;
 
   host.hidden = false;
@@ -203,6 +366,14 @@ function render(res) {
       raised_by_complainant: true
     });
     toast('Escalation sent to the station commander.');
+    render(Store.track(ref, document.getElementById('fullname').value.trim()));
+  };
+
+  const rbtn = document.getElementById('requestReopen');
+  if (rbtn) rbtn.onclick = () => {
+    const res = Store.requestReopenByComplainant(d.id, document.getElementById('reopenText').value);
+    if (!res.ok) { toast(res.error, 'alert'); return; }
+    toast('The case has been reopened and sent back for investigation.');
     render(Store.track(ref, document.getElementById('fullname').value.trim()));
   };
 
