@@ -4,25 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>System guide — Case Docket Accountability System</title>
-<!--
-  USAGE
-  -----
-  guide.html?role=official             Police Official section
-  guide.html?role=detective            Detective section
-  guide.html?role=commander            Station Commander section
-  guide.html?role=<r>&view=rules       Regulations, keeping that reader's context
-  guide.html                           shows a role picker
 
-  A reader only ever sees their own section and the regulations, plus a link
-  back to their dashboard. Admin has no section: it is a technical role with no
-  case duties, so there is nothing for it to be blocked by.
-
-  Deep links for the "Why is this blocked?" helper, e.g.
-  guide.html?role=detective#rule-closure-diary
-  Any element with id starting "rule-" is highlighted when linked to.
-  The dashboards build these links from the blocking code returned by the data
-  layer — see RULE_ANCHORS in js/store.js and whyBlocked() in js/app.js.
--->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
