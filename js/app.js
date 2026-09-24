@@ -246,9 +246,16 @@ function renderChrome(activeHref) {
 
 /* ---------------- public header ---------------- */
 
+/* The landing page is where someone chooses what to do, so that is where the
+   choices belong. Once they are reporting or tracking, the screen is the form
+   and nothing else — a half-filled report is easy to lose to a stray tap on a
+   navigation button, and the pages already carry their own way back. */
 function renderPublicHeader() {
   const host = document.getElementById('chrome');
   if (!host) return;
+  const page = location.pathname.split('/').pop();
+  const isLanding = page === '' || page === 'index.html';
+
   host.innerHTML = `
     <header class="masthead">
       <div class="masthead-inner">
@@ -258,10 +265,9 @@ function renderPublicHeader() {
           <div class="masthead-sub">South African Police Service</div>
         </div>
         <div class="masthead-spacer"></div>
-        <a class="btn btn-sm" href="index.html">Home</a>
-        <a class="btn btn-sm" href="track.html">Track a report</a>
-        <a class="btn btn-sm" href="what-happens-next.html">What happens after you report</a>
-        <a class="btn btn-sm" href="login.html">Staff sign in</a>
+        ${isLanding ? `
+          <a class="btn btn-sm" href="index.html">Home</a>
+          <a class="btn btn-sm" href="login.html">Staff sign in</a>` : ''}
       </div>
     </header>`;
 }
