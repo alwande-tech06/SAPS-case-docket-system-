@@ -29,14 +29,14 @@
   p,li{font-size:15px}
   .card{background:var(--white);border:1px solid var(--line);border-radius:10px;
         padding:18px 20px;margin-bottom:16px}
-  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
-  ol.steps li{counter-increment:s;position:relative;padding:0 0 18px 46px;
+  ol.step-list{counter-reset:s;list-style:none;padding:0;margin:0}
+  ol.step-list li{counter-increment:s;position:relative;padding:0 0 18px 46px;
               border-left:2px solid var(--line);margin-left:16px}
-  ol.steps li:last-child{border-left:2px solid transparent;padding-bottom:0}
-  ol.steps li::before{content:counter(s);position:absolute;left:-17px;top:-2px;
+  ol.step-list li:last-child{border-left:2px solid transparent;padding-bottom:0}
+  ol.step-list li::before{content:counter(s);position:absolute;left:-17px;top:-2px;
        width:32px;height:32px;border-radius:50%;background:var(--navy);color:#fff;
        display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
-  ol.steps strong{display:block;margin-bottom:2px}
+  ol.step-list strong{display:block;margin-bottom:2px}
   .meta{color:var(--muted);font-size:13px}
   details{background:var(--white);border:1px solid var(--line);border-radius:10px;
           margin-bottom:10px;overflow:hidden}
@@ -82,7 +82,7 @@
 
   <h2>The process, step by step</h2>
   <div class="card">
-    <ol class="steps">
+    <ol class="step-list">
       <li><strong>You submit the report</strong>
         Your report is routed automatically to the station responsible for the area where
         the incident happened. You do not need to work out which station that is.</li>
@@ -410,7 +410,7 @@
 
   <h2>If you are not helped</h2>
   <div class="card">
-    <ol class="steps">
+    <ol class="step-list">
       <li><strong>Ask for the commander on duty</strong>
         If an official will not assist you, ask to speak to the shift commander, the
         detective branch commander or the station commander.</li>

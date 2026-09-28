@@ -102,8 +102,8 @@ function render() {
   document.getElementById('refusalChart').innerHTML = byOfficer.length ? byOfficer.map(([name, n]) => `
     <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
       <div class="small" style="min-width:130px">${esc(name)}</div>
-      <div style="flex:1;background:var(--paper-lift);border:1px solid var(--rule-soft);height:16px">
-        <div style="width:${(n / max) * 100}%;height:100%;background:${n === max && n > 1 ? 'var(--stamp)' : 'var(--slate)'}"></div>
+      <div style="flex:1;background:var(--surface-sunk);border:1px solid var(--border-soft);height:16px">
+        <div style="width:${(n / max) * 100}%;height:100%;background:${n === max && n > 1 ? 'var(--alert)' : 'var(--accent)'}"></div>
       </div>
       <div class="ref small">${n}</div>
     </div>`).join('') : '<div class="empty">No refusals recorded at this station.</div>';
@@ -141,7 +141,7 @@ function render() {
   document.getElementById('detAvail').innerHTML = dets.map(u => {
     const load = Store.dockets({ detective_id: u.id }).filter(d => d.current_status !== 'closed').length;
     const avail = u.availability === 'available';
-    return `<div style="display:flex;justify-content:space-between;gap:.6rem;padding:.45rem 0;border-bottom:1px solid var(--rule-soft)">
+    return `<div style="display:flex;justify-content:space-between;gap:.6rem;padding:.45rem 0;border-bottom:1px solid var(--border-soft)">
       <div><div class="small">${esc(u.name)}</div>
         <div class="small muted">${esc(Store.specialisations().find(s => s.id === u.specialisation_id)?.name || 'General')}</div></div>
       <div style="text-align:right">
@@ -491,153 +491,4 @@ function renderCosignQueue() {
       render();
     };
   });
-
-  /* Diagram 5 — approving or refusing a closure. The system will not let the
-     investigating officer who asked for it sign it off. */
-  document.querySelectorAll('[data-closure]').forEach(b => b.onclick = () => {
-    const c = Store.closures({ status: 'pending_approval' }).find(x => x.id === Number(b.dataset.closure));
-    const check = Store.closureChecklist(c.id, me.id);
-    const d = check.docket;
-
-    openModal(`Inspect ${d.cas_number} before filing`, `
-      <div class="notice"><strong>${esc(c.category_label)}</strong>
-        Requested by ${esc(Store.userName(c.requested_by))} on ${esc(fmtDateTime(c.requested_at))}.<br>
-        <span class="small muted">Motivation: ${esc(c.motivation || '—')}</span></div>
-
-      ${c.warrant_reference || c.circulation_reference || c.prosecutor_reference || c.discrepancy_report ? `
-      <table style="margin-bottom:1rem">
-        ${c.warrant_reference ? `<tr><th>Warrant</th><td class="ref">${esc(c.warrant_reference)}</td></tr>` : ''}
-        ${c.circulation_reference ? `<tr><th>Circulation</th><td class="ref">${esc(c.circulation_reference)}</td></tr>` : ''}
-        ${c.prosecutor_reference ? `<tr><th>Prosecutor ref</th><td class="ref">${esc(c.prosecutor_reference)}</td></tr>` : ''}
-        ${c.discrepancy_report ? `<tr><th>Discrepancy</th><td>${esc(c.discrepancy_report)}</td></tr>` : ''}
-      </table>` : ''}
-
-      <h3 style="font-size:.95rem">Closure checklist</h3>
-      <p class="small muted">Each item is checked against the docket, not against an assurance.
-      The docket cannot be filed while any item is outstanding.</p>
-      <ul class="timeline" style="margin-bottom:1rem">
-        ${check.items.map(i => `
-          <li>
-            <div class="when">${i.informational
-              ? '<span class="badge badge-neutral">On approval</span>'
-              : (i.ok ? '<span class="badge badge-good">Satisfied</span>'
-                      : '<span class="badge badge-alert">Outstanding</span>')}</div>
-            <strong>${esc(i.label)}</strong>
-            <div class="small muted">${esc(i.detail)}</div>
-            ${(i.missing || []).length ? `<ul class="small" style="margin:.35rem 0 0 1rem">
-              ${i.missing.map(m => `<li>${esc(m)}</li>`).join('')}</ul>` : ''}
-            ${!i.ok && !i.informational ? whyBlocked(i.code, 'What this rule requires') : ''}
-            ${(i.evidence || []).length ? `<div class="small muted" style="margin-top:.35rem">
-              ${i.evidence.map(e => `<div>· ${esc(e.text)} — <em>${esc(e.state)}</em>${
-                e.answer ? `: ${esc(e.answer)}` : ''}${e.by ? ` (${esc(e.by)})` : ''}</div>`).join('')}
-            </div>` : ''}
-          </li>`).join('')}
-      </ul>
-
-      ${check.canApprove ? '' : `<div class="notice notice-alert">
-        <strong>This docket cannot be filed yet</strong>
-        ${check.blocking.length} item(s) outstanding. You can still refuse the closure and send the
-        case back — that is usually what an outstanding item calls for.
-        ${whyBlocked(check.blocking[0].code, 'Why is approving blocked?')}</div>`}
-
-      <div class="field">
-        <label for="cdr">Your reason <span class="req">*</span></label>
-        <textarea id="cdr" placeholder="What you checked, and why you are approving or refusing."></textarea>
-      </div>
-      <div id="closureErr"></div>
-      <div class="btn-row">
-        <button class="btn btn-danger" id="approveClosure"${check.canApprove ? '' : ' disabled'}>
-          ${check.canApprove ? 'Approve — file the docket' : 'Approve — blocked by the checklist'}</button>
-        <button class="btn btn-primary" id="rejectClosure">Refuse — send it back</button>
-      </div>`, () => {}, 'Close without deciding');
-
-    const decide = decision => {
-      const res = Store.decideClosure(c.id, me, decision, document.getElementById('cdr').value);
-      if (!res.ok) {
-        toast(res.error, 'alert');
-        const host = document.getElementById('closureErr');
-        if (host) host.innerHTML = `<div class="notice notice-alert">
-          <strong>Not recorded</strong>${esc(res.error)}${whyBlocked(res.code)}</div>`;
-        return;
-      }
-      closeModal();
-      toast(decision === 'approved'
-        ? 'Docket filed, the complainant notified and the decision recorded.'
-        : 'Closure refused. The case stays open with the investigating officer.');
-      render();
-    };
-    const approveBtn = document.getElementById('approveClosure');
-    if (!approveBtn.disabled) approveBtn.onclick = () => decide('approved');
-    document.getElementById('rejectClosure').onclick = () => decide('refused');
-  });
-
-  /* Diagram 6 — the brought-forward review on a filed docket. */
-  document.querySelectorAll('[data-bf]').forEach(b => b.onclick = () => {
-    const d = Store.docket(Number(b.dataset.bf));
-    openModal('Brought-forward review', `
-      <div class="notice"><strong>${esc(d.cas_number)}</strong>
-        Filed as ${esc(d.closure_type || '—')}. Twelve months have passed, so it comes back for review.</div>
-      <div class="field">
-        <label for="bfr">New evidence or information, if any</label>
-        <textarea id="bfr" placeholder="Leave empty to note the review and keep the docket filed."></textarea>
-      </div>`, () => {
-      const text = document.getElementById('bfr').value.trim();
-      if (!text) {
-        Store.noteBroughtForwardReview(d.id, me);
-        toast('Review recorded. The docket stays filed.');
-      } else {
-        const res = Store.reopenDocket(d.id, me, { trigger: 'manual', new_evidence: text });
-        if (!res.ok) { toast(res.error, 'alert'); return false; }
-        toast('Case reopened and the complainant notified.');
-      }
-      render();
-    }, 'Record review');
-  });
-
-  document.querySelectorAll('[data-reassign]').forEach(b => b.onclick = () => {
-    const d = Store.docket(Number(b.dataset.reassign));
-    const cat = Store.categories().find(c => c.id === d.category_id);
-    const dets = Store.users().filter(u => u.role === 'detective' && u.is_active &&
-      u.station_id === me.station_id);
-    openModal('Reassign this docket', `
-      <div class="notice"><strong class="ref">${esc(d.cas_number)}</strong>
-        ${esc(Store.categoryName(d.category_id))} — requires
-        ${esc(Store.specialisations().find(s => s.id === cat.required_specialisation_id)?.name || 'general')} specialisation</div>
-      <p class="small">An override is recorded as its own event with your name against it.
-      Override frequency appears in station reports.</p>
-      <div class="field"><label for="rd">Assign to <span class="req">*</span></label>
-        <select id="rd">${dets.map(u => {
-          const load = Store.dockets({ detective_id: u.id }).filter(x => x.current_status !== 'closed').length;
-          const match = u.specialisation_id === cat.required_specialisation_id;
-          return `<option value="${u.id}">${esc(u.name)} — ${load} open${match ? '' : ' (specialisation does not match)'}${u.availability === 'available' ? '' : ' (on leave)'}</option>`;
-        }).join('')}</select></div>
-      <div class="field"><label for="rcat2">Reason <span class="req">*</span></label>
-        <select id="rcat2">
-          <option value="">Select a reason</option>
-          ${Store.reassignmentReasons().map(r => `<option>${esc(r)}</option>`).join('')}
-        </select></div>
-      <div class="field"><label for="rr2">Detail <span class="req">*</span> <span class="small muted">(required for "Other")</span></label>
-        <textarea id="rr2" style="min-height:80px"></textarea></div>
-      <div id="reassignErr"></div>`, () => {
-      const res = Store.reassign(d.id, document.getElementById('rd').value, me,
-        document.getElementById('rcat2').value, document.getElementById('rr2').value);
-      if (!res.ok) {
-        toast(res.error, 'alert');
-        const host = document.getElementById('reassignErr');
-        if (host) host.innerHTML = `<div class="notice notice-alert">
-          <strong>${res.routedToCluster ? 'Routed to the cluster commander' : 'Not reassigned'}</strong>
-          ${esc(res.error)}${whyBlocked(res.code)}</div>`;
-        render();
-        return res.routedToCluster ? undefined : false;
-      }
-      if (d.current_status === 'awaiting_assignment') {
-        Store.updateStatus(d.id, 'registered', me, 'Allocated by commander');
-      }
-      toast(`Docket allocated to ${res.detective.name} and the complainant notified.`);
-      render();
-    }, 'Reassign');
-  });
 }
-
-/* Refusals a police official has proposed. Diagram 1 routes these to the
-   station commander, who is the only person who can sign one off. */
