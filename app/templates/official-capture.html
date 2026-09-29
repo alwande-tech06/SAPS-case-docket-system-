@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capture a report - Police Official</title>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
 <div id="chrome"></div>
@@ -53,24 +54,27 @@
       </select></div>
     <div class="btn-row">
       <button class="btn btn-primary" id="capture">Capture report</button>
-      <a class="btn" href="dashboard-official.html">Cancel</a>
+      <a class="btn" href="{{ url_for('pages.dashboard_official') }}">Cancel</a>
     </div>
   </div>
 
   <div id="done" style="margin-top:1rem"></div>
 </main>
-<script src="js/store.js"></script>
-<script src="js/app.js"></script>
+<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script src="{{ url_for('static', filename='js/store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script>
 const me = requireRole('official');
 if (me) {
-  renderChrome('official-capture.html');
+  renderChrome('{{ url_for('pages.official_capture') }}');
   const cat = document.getElementById('category');
   Store.categories().forEach(c => cat.insertAdjacentHTML('beforeend',
     `<option value="${c.id}">${esc(c.name)}</option>`));
   document.getElementById('idate').value = new Date().toISOString().slice(0,10);
 
-  document.getElementById('capture').onclick = () => {
+  const captureBtn = document.getElementById('capture');
+  captureBtn.onclick = async () => {
+    if (captureBtn.disabled) return;
     const f = id => document.getElementById(id).value.trim();
     if (!f('name') || !f('contact') || !f('location') || !f('description')) {
       toast('Name, contact, location and description are all required.', 'alert'); return;
@@ -92,20 +96,29 @@ if (me) {
     }
     const d = document.getElementById('idate').value;
     const t = document.getElementById('itime').value || '00:00';
-    const rec = Store.submitReport({
-      name: f('name'), contact: f('contact'), id_number: f('idnum'),
-      gender: genderChoice.value, category_id: cat.value,
-      station_id: me.station_id, channel: document.getElementById('channel').value,
-      description: f('description'), location: f('location'),
-      incident_datetime: new Date(d + 'T' + t).toISOString(), created_by: me.id
-    });
+    let rec;
+    captureBtn.disabled = true;
+    try {
+      rec = await Store.submitReport({
+        name: f('name'), contact: f('contact'), id_number: f('idnum'),
+        gender: genderChoice.value, category_id: cat.value,
+        station_id: me.station_id, channel: document.getElementById('channel').value,
+        description: f('description'), location: f('location'),
+        incident_datetime: new Date(d + 'T' + t).toISOString(), created_by: me.id
+      });
+    } catch (e) {
+      toast(e instanceof TypeError ? 'The server could not be reached. Try again.' : e.message, 'alert');
+      return;
+    } finally {
+      captureBtn.disabled = false;
+    }
     const comp = Store.complainant(rec.complainant_id);
     document.getElementById('done').innerHTML = `
       ${stampBlock('Give this number to the complainant', rec.intake_number, 'Received')}
       <p class="small muted" style="margin-top:.8rem">Complainant ID (identifies them across any
         future report): <span class="ref">${esc(comp.complainant_number)}</span></p>
       <div class="btn-row" style="margin-top:1rem">
-        <a class="btn btn-primary" href="dashboard-official.html">Back to pending reports</a>
+        <a class="btn btn-primary" href="{{ url_for('pages.dashboard_official') }}">Back to pending reports</a>
         <button class="btn" onclick="location.reload()">Capture another</button>
       </div>`;
     document.getElementById('done').scrollIntoView({behavior:'smooth'});

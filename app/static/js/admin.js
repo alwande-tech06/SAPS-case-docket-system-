@@ -1,7 +1,7 @@
 /* admin.js — user account administration */
 
 const me = requireRole('admin');
-if (me) { renderChrome('dashboard-admin.html'); render(); }
+if (me) { renderChrome('/dashboard-admin'); render(); }
 
 function render() {
   const users = Store.users();
@@ -18,19 +18,38 @@ function render() {
                         : '<span class="badge badge-neutral">Deactivated</span>'}</td>
       <td class="actions">
         <button class="btn btn-sm" data-edit="${u.id}">Edit</button>
+        ${u.is_active && u.id !== me.id ? `<button class="btn btn-sm" data-reset="${u.id}">Reset password</button>` : ''}
         ${u.is_active ? `<button class="btn btn-sm btn-danger" data-off="${u.id}">Deactivate</button>` : ''}
       </td></tr>`;
   }).join('');
 
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => form(Number(b.dataset.edit)));
+  /* For someone who cannot use "Forgot your password?" — no access to their
+     email, or it has changed. */
+  document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => {
+    const u = Store.users().find(x => x.id === Number(b.dataset.reset));
+    openModal('Reset this password', `
+      <p class="small">${esc(u.name)} gets a new one-time password, shown to you once, and is signed
+      out everywhere. They must choose their own password when they next sign in. Staff who can
+      reach their email can instead use "Forgot your password?" on the sign-in page.</p>
+      <div class="notice"><strong>${esc(u.name)}</strong>${esc(u.email)}</div>`, async () => {
+      const res = await Store.resetUserPassword(u.id, me);
+      if (!res.ok) { toast(res.error, 'alert'); return false; }
+      setTimeout(() => openModal('Password reset', `
+        <p class="small">Give ${esc(res.user.name)} this one-time password in person. It is shown
+        only now.</p>
+        <div class="notice"><strong>${esc(res.user.email)}</strong>
+          <span class="ref">${esc(res.temporary_password)}</span></div>`, () => {}, 'Done'), 0);
+    }, 'Reset password');
+  });
   document.querySelectorAll('[data-off]').forEach(b => b.onclick = () => {
     const u = Store.users().find(x => x.id === Number(b.dataset.off));
     openModal('Deactivate this account', `
       <p class="small">Deactivating removes access. It does not remove ${esc(u.name)} from any
       record of what they did — every past audit entry keeps their name.</p>
       <div class="notice"><strong>${esc(u.name)}</strong>${esc(labelRole(u.role))} ·
-        ${esc(Store.stationName(u.station_id))}</div>`, () => {
-      const res = Store.deactivateUser(u.id, me);
+        ${esc(Store.stationName(u.station_id))}</div>`, async () => {
+      const res = await Store.deactivateUser(u.id, me);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast('Account deactivated. Activity record retained.');
       render();
@@ -72,8 +91,8 @@ function form(id) {
       <select id="ua">
         <option value="available"${u.availability === 'available' ? ' selected' : ''}>Available</option>
         <option value="on_leave"${u.availability === 'on_leave' ? ' selected' : ''}>On leave</option>
-      </select></div>` : `<p class="small muted">The starting password is
-        <span class="ref">demo1234</span> and must be changed at first sign-in.</p>`}`, () => {
+      </select></div>` : `<p class="small muted">A one-time password is generated and shown once
+        when the account is created. The new user must change it at first sign-in.</p>`}`, async () => {
     const name = document.getElementById('un').value.trim();
     const email = document.getElementById('ue').value.trim();
     if (!name || !email) { toast('Name and email address are both required.', 'alert'); return false; }
@@ -83,8 +102,15 @@ function form(id) {
       station_id: document.getElementById('us').value,
       specialisation_id: document.getElementById('up').value || null };
     if (u) payload.availability = document.getElementById('ua').value;
-    Store.saveUser(payload, me);
-    toast(u ? 'Account updated.' : 'Account created.');
+    const res = await Store.saveUser(payload, me);
+    if (!res.ok) { toast(res.error, 'alert'); return false; }
     render();
+    if (!res.temporary_password) { toast('Account updated.'); return; }
+    /* Shown once and never stored in the clear: hand it over in person. */
+    setTimeout(() => openModal('Account created', `
+      <p class="small">Give ${esc(res.user.name)} this one-time password in person. It is shown only
+      now, and they must choose their own password when they first sign in.</p>
+      <div class="notice"><strong>${esc(res.user.email)}</strong>
+        <span class="ref">${esc(res.temporary_password)}</span></div>`, () => {}, 'Done'), 0);
   }, u ? 'Save changes' : 'Create account');
 }

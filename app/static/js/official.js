@@ -2,7 +2,7 @@
 
 const me = requireRole('official');
 let selectedId = null;
-if (me) { renderChrome('dashboard-official.html'); render(); }
+if (me) { renderChrome('/dashboard-official'); render(); }
 
 function render() {
   const all = Store.intakes({ station_id: me.station_id });
@@ -195,7 +195,7 @@ function wire() {
       <div class="field">
         <label for="stmt">Statement taken from the complainant <span class="req">*</span></label>
         <textarea id="stmt" placeholder="Record the statement as given.">${esc(i.incident_description)}</textarea>
-      </div>`, () => {
+      </div>`, async () => {
       if (!document.getElementById('stmt').value.trim()) {
         toast('A statement is required before a docket can be opened.', 'alert'); return false;
       }
@@ -203,7 +203,7 @@ function wire() {
       if (needsClass && !chosen) {
         toast('Classify the report before opening a docket on it.', 'alert'); return false;
       }
-      const res = Store.openDocket(i.id, me, { category_id: chosen });
+      const res = await Store.openDocket(i.id, me, { category_id: chosen });
       if (!res) { toast('That report has already been dealt with.', 'alert'); return; }
       toast(res.assigned
         ? `${res.docket.cas_number} opened and assigned to ${res.assigned.name}.`
@@ -267,8 +267,8 @@ function wire() {
 
       <h4 style="font-size:.9rem;margin:1rem 0 .3rem">What this ground requires</h4>
       <div id="refuseChecklist"></div>
-      <div id="refusalErr"></div>`, () => {
-      const res = Store.recordRefusal(i.id, me, refusalDraft());
+      <div id="refusalErr"></div>`, async () => {
+      const res = await Store.recordRefusal(i.id, me, refusalDraft());
       if (!res.ok) {
         toast(res.error, 'alert');
         document.getElementById('refusalErr').innerHTML = `<div class="notice notice-alert">
@@ -338,8 +338,8 @@ function wire() {
       </div>
       <h4 style="font-size:.9rem;margin:1rem 0 .3rem">What this needs</h4>
       <div id="transferChecklist"></div>
-      <div id="transferErr"></div>`, () => {
-      const res = Store.registerAndTransfer(i.id, me, transferDraft());
+      <div id="transferErr"></div>`, async () => {
+      const res = await Store.registerAndTransfer(i.id, me, transferDraft());
       if (!res.ok) {
         toast(res.error, 'alert');
         document.getElementById('transferErr').innerHTML = `<div class="notice notice-alert">

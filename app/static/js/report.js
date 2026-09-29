@@ -2,8 +2,6 @@
 
 renderPublicHeader();
 
-let otpCode = null;
-
 /* categories */
 const catSel = document.getElementById('category');
 Store.categories().forEach(c => {
@@ -78,13 +76,13 @@ function guideSections() {
 
     try {
       if (typeof fetch === 'function') {
-        fetch('what-happens-next.html')
+        fetch('/what-happens-next')
           .then(r => (r.ok ? r.text().then(parse) : resolve(null)))
           .catch(() => resolve(null));
         return;
       }
       const xhr = new XMLHttpRequest();
-      xhr.open('GET', 'what-happens-next.html');
+      xhr.open('GET', '/what-happens-next');
       xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? parse(xhr.responseText) : resolve(null));
       xhr.onerror = () => resolve(null);
       xhr.send();
@@ -97,7 +95,7 @@ function guideSections() {
 
 function renderGuideLink(categoryName) {
   guideHost.innerHTML = `<p class="small guide-more" style="margin:-.2rem 0 1.1rem">
-    <a href="what-happens-next.html">What happens after you report${categoryName ? ' — the full guide' : ''}</a>
+    <a href="/what-happens-next">What happens after you report${categoryName ? ' — the full guide' : ''}</a>
   </p>`;
 }
 
@@ -117,7 +115,7 @@ function renderGuideSection(categoryName) {
         <summary>What happens with a report of ${esc((heading ? heading.textContent : categoryName).toLowerCase())}</summary>
         <div class="guide-body">
           ${body ? body.innerHTML : ''}
-          <p class="guide-more"><a href="what-happens-next.html">Read the full guide</a> — the process, what is
+          <p class="guide-more"><a href="/what-happens-next">Read the full guide</a> — the process, what is
           expected of you, the possible outcomes, and your rights.</p>
         </div>
       </details>`;
@@ -255,7 +253,9 @@ document.getElementById('toStep2').onclick = () => {
 
 document.getElementById('backTo1').onclick = () => show(1);
 
-document.getElementById('sendOtp').onclick = () => {
+document.getElementById('sendOtp').onclick = async () => {
+  const sendBtn = document.getElementById('sendOtp');
+  if (sendBtn.disabled) return;
   const name = document.getElementById('name').value.trim();
   const contact = document.getElementById('contact').value.trim();
   const idNumber = document.getElementById('idnum').value.trim();
@@ -273,17 +273,27 @@ document.getElementById('sendOtp').onclick = () => {
     return;
   }
 
-  otpCode = String(Math.floor(100000 + Math.random() * 900000));
-  document.getElementById('otpShown').textContent = otpCode;
+  /* The server sends the code and keeps it; this page never knows it, except
+     on a demonstration system with no SMS, where it is shown instead. */
+  sendBtn.disabled = true;
+  const sent = await Store.sendReportOtp({ name, contact, id_number: idNumber });
+  sendBtn.disabled = false;
+  if (!sent.ok) { toast(sent.error, 'alert'); return; }
+  document.getElementById('otpDemo').hidden = !sent.demo_code;
+  document.getElementById('otpSent').hidden = !!sent.demo_code;
+  document.getElementById('otpShown').textContent = sent.demo_code || '';
   document.getElementById('otpBox').hidden = false;
-  document.getElementById('sendOtp').textContent = 'Resend code';
+  sendBtn.textContent = 'Resend code';
   document.getElementById('submitReport').hidden = false;
   document.getElementById('otp').focus();
 };
 
-document.getElementById('submitReport').onclick = async () => {
-  if (document.getElementById('otp').value.trim() !== otpCode) {
-    toast('That code does not match the one we sent.', 'alert');
+const submitBtn = document.getElementById('submitReport');
+submitBtn.onclick = async () => {
+  if (submitBtn.disabled) return;
+  const otp = document.getElementById('otp').value.trim();
+  if (!/^\d{6}$/.test(otp)) {
+    toast('Enter the six-digit code we sent to your phone.', 'alert');
     return;
   }
 
@@ -296,26 +306,37 @@ document.getElementById('submitReport').onclick = async () => {
 
   const genderChoice = document.querySelector('input[name="gender"]:checked');
 
-  const rec = Store.submitReport({
-    name: document.getElementById('name').value.trim(),
-    contact: document.getElementById('contact').value.trim(),
-    id_number: document.getElementById('idnum').value.trim(),
-    gender: genderChoice ? genderChoice.value : null,
-    category_id: catSel.value,
-    channel: 'public_web',
-    description: document.getElementById('description').value.trim(),
-    location: document.getElementById('location').value.trim(),
-    incident_datetime: new Date(d + 'T' + t).toISOString(),
-    details: collectCategoryDetails(),
-    suspect: suspectSel.value === 'yes' ? {
-      name: document.getElementById('suspectName').value,
-      description: document.getElementById('suspectDesc').value,
-      contact: document.getElementById('suspectContact').value
-    } : null,
-    witnesses: collectWitnesses()
-  });
-
-  if (converted.attachments.length) Store.addComplainantEvidence(rec.id, converted.attachments, '');
+  let rec;
+  submitBtn.disabled = true;
+  try {
+    rec = await Store.submitReport({
+      name: document.getElementById('name').value.trim(),
+      contact: document.getElementById('contact').value.trim(),
+      id_number: document.getElementById('idnum').value.trim(),
+      gender: genderChoice ? genderChoice.value : null,
+      category_id: catSel.value,
+      channel: 'public_web',
+      description: document.getElementById('description').value.trim(),
+      location: document.getElementById('location').value.trim(),
+      incident_datetime: new Date(d + 'T' + t).toISOString(),
+      details: collectCategoryDetails(),
+      suspect: suspectSel.value === 'yes' ? {
+        name: document.getElementById('suspectName').value,
+        description: document.getElementById('suspectDesc').value,
+        contact: document.getElementById('suspectContact').value
+      } : null,
+      witnesses: collectWitnesses(),
+      otp
+    });
+    if (converted.attachments.length) await Store.addComplainantEvidence(rec.id, converted.attachments, '');
+  } catch (e) {
+    toast(e instanceof TypeError
+      ? 'The report could not be sent — check your connection and try again. Nothing was lost.'
+      : e.message, 'alert');
+    return;
+  } finally {
+    submitBtn.disabled = false;
+  }
 
   document.getElementById('stampHost').innerHTML =
     stampBlock('Your reference number', rec.intake_number, 'Received') +

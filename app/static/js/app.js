@@ -112,10 +112,18 @@ function openModal(title, bodyHtml, onConfirm, confirmLabel) {
     if (first) first.focus();
     return;
   }
-  modal.querySelector('#modalOk').onclick = () => {
+  const ok = modal.querySelector('#modalOk');
+  ok.onclick = () => {
+    if (ok.disabled) return;
     const result = onConfirm();
-    if (result && typeof result.then === 'function') result.then(r => { if (r !== false) closeModal(); });
-    else if (result !== false) closeModal();
+    if (result && typeof result.then === 'function') {
+      /* A save that goes to the server: one press only, and the dialog stays
+         open with what was typed if it does not go through. */
+      ok.disabled = true;
+      result.then(r => { if (r !== false) closeModal(); })
+        .catch(err => toast((err && err.message) || 'That could not be saved. Try again.', 'alert'))
+        .finally(() => { ok.disabled = false; });
+    } else if (result !== false) closeModal();
   };
   const first = modal.querySelector('input, select, textarea');
   if (first) first.focus();
@@ -145,7 +153,7 @@ function ruleHref(code) {
   if (!rule) return null;
   const s = Store.session();
   const role = s && GUIDE_ROLES.includes(s.role) ? s.role : rule.role;
-  return `guide.html?role=${role}#${rule.anchor}`;
+  return `/guide?role=${role}#${rule.anchor}`;
 }
 
 function whyBlocked(code, label) {
@@ -158,16 +166,16 @@ function whyBlocked(code, label) {
 /* ---------------- role guard ---------------- */
 
 const ROLE_HOME = {
-  official:  'dashboard-official.html',
-  detective: 'dashboard-detective.html',
-  commander: 'dashboard-commander.html',
-  admin:     'dashboard-admin.html'
+  official:  '/dashboard-official',
+  detective: '/dashboard-detective',
+  commander: '/dashboard-commander',
+  admin:     '/dashboard-admin'
 };
 
 function requireRole(role) {
   const s = Store.session();
-  if (!s) { location.replace('login.html'); return null; }
-  if (s.role !== role) { location.replace(ROLE_HOME[s.role] || 'login.html'); return null; }
+  if (!s) { location.replace('/login'); return null; }
+  if (s.role !== role) { location.replace(ROLE_HOME[s.role] || '/login'); return null; }
   return s;
 }
 
@@ -175,24 +183,24 @@ function requireRole(role) {
 
 const NAV = {
   official: [
-    { href: 'dashboard-official.html', label: 'Pending reports', badge: 'pending' },
-    { href: 'official-capture.html',   label: 'Capture a report' },
-    { href: 'official-cases.html',     label: 'Station cases' }
+    { href: '/dashboard-official', label: 'Pending reports', badge: 'pending' },
+    { href: '/official-capture',   label: 'Capture a report' },
+    { href: '/official-cases',     label: 'Station cases' }
   ],
   detective: [
-    { href: 'dashboard-detective.html', label: 'My cases' }
+    { href: '/dashboard-detective', label: 'My cases' }
   ],
   commander: [
-    { href: 'dashboard-commander.html',   label: 'Oversight' },
-    { href: 'commander-cases.html',       label: 'All station cases' },
-    { href: 'commander-refusals.html',    label: 'Refusals', badge: 'refusals' },
-    { href: 'commander-withdrawals.html', label: 'Withdrawal requests', badge: 'withdrawals' },
-    { href: 'audit.html',                 label: 'Audit trail' }
+    { href: '/dashboard-commander',   label: 'Oversight' },
+    { href: '/commander-cases',       label: 'All station cases' },
+    { href: '/commander-refusals',    label: 'Refusals', badge: 'refusals' },
+    { href: '/commander-withdrawals', label: 'Withdrawal requests', badge: 'withdrawals' },
+    { href: '/audit',                 label: 'Audit trail' }
   ],
   admin: [
-    { href: 'dashboard-admin.html', label: 'User accounts' },
-    { href: 'admin-reference.html', label: 'Reference data' },
-    { href: 'audit.html',           label: 'Audit trail' }
+    { href: '/dashboard-admin', label: 'User accounts' },
+    { href: '/admin-reference', label: 'Reference data' },
+    { href: '/audit',           label: 'Audit trail' }
   ]
 };
 
@@ -217,7 +225,7 @@ function renderChrome(activeHref) {
      check what a rule requires. Admin has no Help item: it is a technical role
      with no case duties, so the guide has nothing to tell it. */
   (GUIDE_ROLES.includes(s.role)
-    ? `<a class="tab tab-help" href="guide.html?role=${esc(s.role)}" target="_blank" rel="noopener">Help</a>`
+    ? `<a class="tab tab-help" href="/guide?role=${esc(s.role)}" target="_blank" rel="noopener">Help</a>`
     : '');
 
   host.innerHTML = `
@@ -238,9 +246,9 @@ function renderChrome(activeHref) {
     </header>
     <nav class="tabs"><div class="tabs-inner">${tabs}</div></nav>`;
 
-  document.getElementById('signOut').onclick = () => {
-    Store.logout();
-    location.href = 'login.html';
+  document.getElementById('signOut').onclick = async () => {
+    await Store.logout();
+    location.href = '/login';
   };
 }
 
@@ -254,7 +262,7 @@ function renderPublicHeader() {
   const host = document.getElementById('chrome');
   if (!host) return;
   const page = location.pathname.split('/').pop();
-  const isLanding = page === '' || page === 'index.html';
+  const isLanding = page === 'index';
 
   host.innerHTML = `
     <header class="masthead">
@@ -266,8 +274,8 @@ function renderPublicHeader() {
         </div>
         <div class="masthead-spacer"></div>
         ${isLanding ? `
-          <a class="btn btn-sm" href="index.html">Home</a>
-          <a class="btn btn-sm" href="login.html">Staff sign in</a>` : ''}
+          <a class="btn btn-sm" href="/index">Home</a>
+          <a class="btn btn-sm" href="/login">Staff sign in</a>` : ''}
       </div>
     </header>`;
 }
@@ -295,10 +303,11 @@ function priorityBadge(p) {
 }
 
 /* ---------------- file attachments (images / documents) ----------------
-   Reads File objects into data URLs client-side (there is no upload backend
-   yet — see store.js header). Kept out of store.js so Store never touches
-   the DOM/FileReader; pages convert files first, then hand Store plain
-   {name, type, size, dataUrl} objects. */
+   Reads File objects into data URLs, which travel to the server inside the
+   JSON of the change they belong to; the server stores the file and the
+   record keeps its /api/files/<id> address. Kept out of store.js so Store
+   never touches the DOM/FileReader; pages convert files first, then hand
+   Store plain {name, type, size, dataUrl} objects. */
 function filesToAttachments(fileList, opts) {
   const maxFiles = (opts && opts.maxFiles) || 5;
   const maxBytes = (opts && opts.maxBytes) || 2 * 1024 * 1024;
@@ -320,11 +329,9 @@ function filesToAttachments(fileList, opts) {
       .catch(err => ({ ok: false, error: err.message }));
 }
 
-/* Attachments live as data: URLs because there is no upload backend yet.
-   Browsers refuse to navigate a top-level tab to a data: URL, so opening one in
-   a new tab lands on a blank page. An <img> pointing at the same data URL is a
-   subresource and renders normally, so images expand in place instead, and
-   documents download rather than navigate. */
+/* An attachment is a file URL on the server (or, just after it was chosen, a
+   data: URL). Images expand in place and documents download, so neither
+   depends on opening a new tab. */
 function fileChip(att) {
   const isImage = (att.file_type || att.type || '').startsWith('image/');
   const url = att.data_url || att.dataUrl;
@@ -364,8 +371,7 @@ function stampBlock(label, number, mark) {
    makes the link unguessable — landing on it still asks for the ID number on
    the report and an OTP before anything is shown. */
 function trackUrl(refNumber, token) {
-  const path = location.pathname.replace(/[^/]*$/, '');
-  return location.origin + path + 'track.html?ref=' + encodeURIComponent(refNumber) +
+  return location.origin + '/track?ref=' + encodeURIComponent(refNumber) +
     (token ? '&t=' + encodeURIComponent(token) : '');
 }
 
@@ -413,7 +419,7 @@ function renderLedger(entries, hostId) {
               <td>${esc(labelRole(e.user_role))}</td>
               <td>${esc(e.action_type)}</td>
               <td style="font-family:var(--sans)">${esc(e.description)}</td>
-              <td class="hash">${esc(e.entry_hash)}</td>
+              <td class="hash" title="${esc(e.entry_hash)}">${esc(String(e.entry_hash || '').slice(0, 12))}</td>
             </tr>`).join('') : emptyRow(6, 'No entries recorded yet.')}
         </tbody>
       </table>

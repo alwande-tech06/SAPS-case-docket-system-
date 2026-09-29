@@ -7,7 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
 <div id="chrome"></div>
@@ -18,7 +19,7 @@
   <p class="small muted">Every action you take in this system is recorded against your name
   and the role you hold at the time.</p>
 
-  <div class="card" style="margin-top:1.2rem">
+  <div class="card" id="signInCard" style="margin-top:1.2rem">
     <div class="field">
       <label for="email">Email address</label>
       <input type="text" id="email" autocomplete="username">
@@ -28,25 +29,69 @@
       <input type="password" id="password" autocomplete="current-password">
     </div>
     <button class="btn btn-primary" id="signIn" style="width:100%">Sign in</button>
+    <p class="small" style="margin:.8rem 0 0;text-align:center">
+      <a href="#forgot" id="forgotLink">Forgot your password?</a></p>
     <div id="loginError"></div>
   </div>
 
-  <div class="demo-users">
+  <!-- "Forgot your password?": a link to the email on the account. -->
+  <div class="card" id="forgotCard" style="margin-top:1.2rem" hidden>
+    <div class="card-head"><h2>Reset your password</h2></div>
+    <p class="small muted">Enter the email address of your account. If it has one, we send a
+    link to it that lets you choose a new password within 30 minutes.</p>
+    <div class="field">
+      <label for="forgotEmail">Email address</label>
+      <input type="text" id="forgotEmail" autocomplete="username">
+    </div>
+    <button class="btn btn-primary" id="sendReset" style="width:100%">Send the link</button>
+    <div id="forgotResult"></div>
+    <p class="small" style="margin:.8rem 0 0;text-align:center"><a href="#" id="backToSignIn">Back to sign in</a></p>
+  </div>
+
+  <!-- A new account signs in with a one-time password and must replace it. -->
+  <div class="card" id="changeCard" style="margin-top:1.2rem" hidden>
+    <div class="card-head"><h2>Choose your own password</h2></div>
+    <p class="small muted">You signed in with a one-time password. Choose one only you know
+    before continuing: at least 10 characters, with letters and numbers.</p>
+    <div class="field" id="currentWrap">
+      <label for="currentPassword">One-time password</label>
+      <input type="password" id="currentPassword" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label for="newPassword">New password</label>
+      <input type="password" id="newPassword" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="newPassword2">New password again</label>
+      <input type="password" id="newPassword2" autocomplete="new-password">
+    </div>
+    <button class="btn btn-primary" id="savePassword" style="width:100%">Save and continue</button>
+    <div id="changeError"></div>
+  </div>
+
+  <div class="demo-users" id="demoUsers" hidden>
     <p class="eyebrow">Demonstration accounts — tap to fill</p>
     <div id="demoList"></div>
     <p class="small muted" style="margin-top:.6rem">Password for all accounts: <span class="ref">demo1234</span></p>
   </div>
 
   <div class="btn-row" style="margin-top:1.2rem">
-    <a class="btn btn-sm" href="index.html">Public reporting</a>
-    <button class="btn btn-sm" id="resetData">Reset demonstration data</button>
+    <a class="btn btn-sm" href="{{ url_for('pages.index') }}">Public reporting</a>
+    <button class="btn btn-sm" id="resetData" hidden>Reset demonstration data</button>
   </div>
 </main>
 
-<script src="js/store.js"></script>
-<script src="js/app.js"></script>
+<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script src="{{ url_for('static', filename='js/store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script>
-if (Store.session()) location.replace(ROLE_HOME[Store.session().role]);
+if (Store.session() && !Store.mustChangePassword()) location.replace(ROLE_HOME[Store.session().role]);
+if (Store.session() && Store.mustChangePassword()) showChangePassword();
+
+/* Demonstration accounts and the reset exist only when the server runs in
+   demonstration mode. */
+document.getElementById('demoUsers').hidden = !Store.demoMode();
+document.getElementById('resetData').hidden = !Store.demoMode();
 
 const demo = [
   { email: 'official@saps.demo',  label: 'Sgt. M. Dlamini',  role: 'Police Official' },
@@ -66,23 +111,91 @@ document.querySelectorAll('#demoList button').forEach(b => {
   };
 });
 
-function signIn() {
-  const res = Store.login(
-    document.getElementById('email').value,
-    document.getElementById('password').value);
-  const box = document.getElementById('loginError');
+let signedInAs = null;
+
+async function signIn() {
+  const btn = document.getElementById('signIn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const res = await Store.login(document.getElementById('email').value,
+                                document.getElementById('password').value);
+  btn.disabled = false;
   if (!res.ok) {
-    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Cannot sign in</strong>${esc(res.error)}</div>`;
+    document.getElementById('loginError').innerHTML =
+      `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Cannot sign in</strong>${esc(res.error)}</div>`;
     return;
   }
+  signedInAs = res.user;
+  if (res.must_change_password) { showChangePassword(); return; }
   location.href = ROLE_HOME[res.user.role];
+}
+
+/* Straight after signing in, the one-time password is still in the form; on a
+   later visit it has to be typed again. */
+function showChangePassword() {
+  const justTyped = !!document.getElementById('password').value;
+  document.getElementById('signInCard').hidden = true;
+  document.getElementById('changeCard').hidden = false;
+  document.getElementById('currentWrap').hidden = justTyped;
+  document.getElementById(justTyped ? 'newPassword' : 'currentPassword').focus();
+}
+
+async function savePassword() {
+  const next = document.getElementById('newPassword').value;
+  const box = document.getElementById('changeError');
+  const fail = msg => {
+    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Not changed</strong>${esc(msg)}</div>`;
+  };
+  if (next !== document.getElementById('newPassword2').value) { fail('The two passwords are not the same.'); return; }
+  const current = document.getElementById('password').value || document.getElementById('currentPassword').value;
+  if (!current) { fail('Enter the one-time password you were given.'); return; }
+  const res = await Store.changePassword(current, next);
+  if (!res.ok) { fail(res.error); return; }
+  location.href = ROLE_HOME[(signedInAs || Store.session()).role];
 }
 
 document.getElementById('signIn').onclick = signIn;
 document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+document.getElementById('savePassword').onclick = savePassword;
+document.getElementById('newPassword2').addEventListener('keydown', e => { if (e.key === 'Enter') savePassword(); });
 
-document.getElementById('resetData').onclick = () => {
-  Store.reset();
+/* ----- forgot your password ----- */
+function showForgot(on) {
+  document.getElementById('signInCard').hidden = on;
+  document.getElementById('forgotCard').hidden = !on;
+  if (on) {
+    document.getElementById('forgotEmail').value = document.getElementById('email').value;
+    document.getElementById('forgotEmail').focus();
+  }
+}
+document.getElementById('forgotLink').onclick = e => { e.preventDefault(); showForgot(true); };
+document.getElementById('backToSignIn').onclick = e => { e.preventDefault(); showForgot(false); };
+if (location.hash === '#forgot' && !Store.session()) showForgot(true);
+
+async function sendReset() {
+  const btn = document.getElementById('sendReset');
+  const email = document.getElementById('forgotEmail').value.trim();
+  const box = document.getElementById('forgotResult');
+  if (!email) { box.innerHTML = '<div class="notice notice-alert" style="margin-top:.9rem"><strong>Enter your email address</strong></div>'; return; }
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const res = await Store.requestPasswordReset(email);
+  btn.disabled = false;
+  if (!res.ok) {
+    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Not sent</strong>${esc(res.error)}</div>`;
+    return;
+  }
+  /* The same message whether or not the address has an account. */
+  box.innerHTML = `<div class="notice" style="margin-top:.9rem"><strong>Check your email</strong>
+    If ${esc(email)} belongs to an account, a link to reset its password is on its way. It works for 30 minutes.
+    ${res.demo_link ? `<div style="margin-top:.6rem">This demonstration system sends no email. The link is:
+      <a href="${esc(res.demo_link)}" id="demoResetLink">reset the password</a></div>` : ''}</div>`;
+}
+document.getElementById('sendReset').onclick = sendReset;
+document.getElementById('forgotEmail').addEventListener('keydown', e => { if (e.key === 'Enter') sendReset(); });
+
+document.getElementById('resetData').onclick = async () => {
+  await Store.reset();
   location.reload();
 };
 </script>

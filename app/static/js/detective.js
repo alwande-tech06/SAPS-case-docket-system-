@@ -2,7 +2,7 @@
 
 const me = requireRole('detective');
 let openId = null;
-if (me) { renderChrome('dashboard-detective.html'); render(); }
+if (me) { renderChrome('/dashboard-detective'); render(); }
 
 function render() {
   const mine = Store.dockets({ detective_id: me.id });
@@ -247,10 +247,11 @@ function detail(id) {
 
   document.getElementById('addNote').onclick = () => openModal('Add a progress note', `
     <div class="field"><label for="nt">Note <span class="req">*</span></label>
-      <textarea id="nt" placeholder="What was done, and what is next."></textarea></div>`, () => {
+      <textarea id="nt" placeholder="What was done, and what is next."></textarea></div>`, async () => {
     const t = document.getElementById('nt').value.trim();
     if (!t) { toast('Write the note before saving.', 'alert'); return false; }
-    Store.addNote(id, me, t); toast('Progress note added.'); render();
+    if (await Store.addNote(id, me, t) === false) return false;
+    toast('Progress note added.'); render();
   });
 
   document.getElementById('addEvidence').onclick = () => openModal('Register an exhibit', `
@@ -308,7 +309,7 @@ function detail(id) {
     }
 
     const chargeSelect = document.getElementById('ech');
-    const res = Store.addEvidence(id, me, {
+    const res = await Store.addEvidence(id, me, {
       description: desc,
       evidence_type: document.getElementById('et').value,
       storage_location: document.getElementById('es').value.trim(),
@@ -333,11 +334,11 @@ function detail(id) {
     <div class="field"><label for="an">Name of accused <span class="req">*</span></label>
       <input type="text" id="an"></div>
     <div class="field"><label for="ac">Charge <span class="req">*</span></label>
-      <input type="text" id="ac"></div>`, () => {
+      <input type="text" id="ac"></div>`, async () => {
     const n = document.getElementById('an').value.trim();
     const c2 = document.getElementById('ac').value.trim();
     if (!n || !c2) { toast('Both the name and the charge are required.', 'alert'); return false; }
-    Store.addArrest(id, me, { accused_name: n, charge_description: c2 });
+    if (await Store.addArrest(id, me, { accused_name: n, charge_description: c2 }) === false) return false;
     toast('Arrest recorded.'); render();
   });
 
@@ -349,10 +350,10 @@ function detail(id) {
       <p class="hint">Closing a case is not a status change. Use "Request closure" — a filing
       category must be chosen and the commander must approve it.</p></div>
     <div class="field"><label for="sn">Note <span class="req">*</span></label>
-      <textarea id="sn" style="min-height:80px"></textarea></div>`, () => {
+      <textarea id="sn" style="min-height:80px"></textarea></div>`, async () => {
     const nt = document.getElementById('sn').value.trim();
     if (!nt) { toast('Record why the status is changing.', 'alert'); return false; }
-    Store.updateStatus(id, document.getElementById('st').value, me, nt);
+    if (!await Store.updateStatus(id, document.getElementById('st').value, me, nt)) return false;
     toast('Status updated.'); render();
   });
 
@@ -379,9 +380,9 @@ function detail(id) {
         <label for="fm">Motivation <span class="req">*</span></label>
         <textarea id="fm" placeholder="What was done, and why the case cannot go further."></textarea>
       </div>
-      <div id="fcBlocker"></div>`, () => {
+      <div id="fcBlocker"></div>`, async () => {
       const key = document.getElementById('fc').value;
-      const res = Store.requestClosure(id, me, {
+      const res = await Store.requestClosure(id, me, {
         category: key,
         motivation: document.getElementById('fm').value,
         warrant_reference: val('fWarrant'),
@@ -434,8 +435,8 @@ function detail(id) {
         <textarea id="instrResp" placeholder="${done
           ? 'What was done, when, and what came of it.'
           : 'Why the instruction could not be carried out.'}"></textarea>
-      </div>`, () => {
-      const res = Store.answerInstruction(noteId, me, outcome, document.getElementById('instrResp').value);
+      </div>`, async () => {
+      const res = await Store.answerInstruction(noteId, me, outcome, document.getElementById('instrResp').value);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast(done ? 'Recorded against the instruction.' : 'Explanation recorded.');
       render();
@@ -448,8 +449,8 @@ function detail(id) {
     <div class="field"><label for="wn">Name <span class="req">*</span></label>
       <input type="text" id="wn" placeholder="Name and surname"></div>
     <div class="field"><label for="wc">Contact</label>
-      <input type="text" id="wc" placeholder="Phone number, if known"></div>`, () => {
-    const res = Store.addWitness(id, me, { name: document.getElementById('wn').value,
+      <input type="text" id="wc" placeholder="Phone number, if known"></div>`, async () => {
+    const res = await Store.addWitness(id, me, { name: document.getElementById('wn').value,
       contact: document.getElementById('wc').value });
     if (!res.ok) { toast(res.error, 'alert'); return false; }
     toast('Witness recorded.'); render();
@@ -463,8 +464,8 @@ function detail(id) {
       <div class="field"><label for="wnr">Or, why no statement could be taken</label>
         <input type="text" id="wnr" placeholder="e.g. witness has relocated and cannot be traced"></div>
       <p class="small muted">One or the other. A witness left with neither blocks the docket from
-      being filed.</p>`, () => {
-      const res = Store.recordWitnessStatement(w.id, me,
+      being filed.</p>`, async () => {
+      const res = await Store.recordWitnessStatement(w.id, me,
         document.getElementById('wst').value, document.getElementById('wnr').value);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast('Recorded on the docket.'); render();
@@ -481,9 +482,9 @@ function detail(id) {
         ${evidence.map(e => `<option value="${e.id}">${esc(e.exhibit_number)} — ${esc(e.description)}</option>`).join('')}
       </select></div>` : ''}
     <p class="small muted">Every submission must come back with a result, or be accounted for, before
-    the docket can be filed.</p>`, () => {
+    the docket can be filed.</p>`, async () => {
     const sel = document.getElementById('fe');
-    const res = Store.submitForensic(id, me, {
+    const res = await Store.submitForensic(id, me, {
       description: document.getElementById('fd').value,
       lab_reference: document.getElementById('fl').value,
       evidence_id: sel ? sel.value : null
@@ -498,8 +499,8 @@ function detail(id) {
       <div class="field"><label for="fr">Result</label>
         <textarea id="fr" placeholder="What the laboratory reported."></textarea></div>
       <div class="field"><label for="fa">Or, account for why it is outstanding</label>
-        <input type="text" id="fa" placeholder="e.g. laboratory backlog, result expected in March"></div>`, () => {
-      const res = Store.recordForensicResult(f.id, me,
+        <input type="text" id="fa" placeholder="e.g. laboratory backlog, result expected in March"></div>`, async () => {
+      const res = await Store.recordForensicResult(f.id, me,
         document.getElementById('fr').value, document.getElementById('fa').value);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast('Recorded on the docket.'); render();
@@ -515,8 +516,8 @@ function detail(id) {
     <div class="field">
       <label for="rv">New evidence or information <span class="req">*</span></label>
       <textarea id="rv" placeholder="What has come to light since the docket was filed."></textarea>
-    </div>`, () => {
-    const res = Store.reopenDocket(id, me, { trigger: 'manual', new_evidence: document.getElementById('rv').value });
+    </div>`, async () => {
+    const res = await Store.reopenDocket(id, me, { trigger: 'manual', new_evidence: document.getElementById('rv').value });
     if (!res.ok) { toast(res.error, 'alert'); return false; }
     toast('Case reopened and the complainant notified.');
     render();
@@ -532,12 +533,13 @@ function detail(id) {
     <div class="field"><label for="ho">Organisation</label>
       <select id="ho"><option>National Prosecuting Authority</option><option>Durban Magistrate's Court</option></select></div>
     <div class="field"><label for="hr">Receipt reference <span class="req">*</span></label>
-      <input type="text" id="hr" placeholder="Reference given by the recipient"></div>`, () => {
+      <input type="text" id="hr" placeholder="Reference given by the recipient"></div>`, async () => {
     const n = document.getElementById('hn').value.trim();
     const r = document.getElementById('hr').value.trim();
     if (!n || !r) { toast('The recipient and receipt reference are both required.', 'alert'); return false; }
-    Store.handover(id, me, { recipient_name: n,
+    const handed = await Store.handover(id, me, { recipient_name: n,
       recipient_organisation: document.getElementById('ho').value, receipt_reference: r });
+    if (handed === false) return false;
     toast('Handover recorded.'); render();
   });
 
@@ -546,8 +548,8 @@ function detail(id) {
       <p class="small">Accepting this makes it an exhibit on the docket, so it needs a register
       entry like any other item.</p>
       <div class="field"><label for="ce13">SAPS 13 register number <span class="req">*</span></label>
-        <input type="text" id="ce13" placeholder="e.g. SAP13/412/2026"></div>`, () => {
-      const res = Store.reviewComplainantEvidence(Number(b.dataset.acceptCe), me, 'accepted', '',
+        <input type="text" id="ce13" placeholder="e.g. SAP13/412/2026"></div>`, async () => {
+      const res = await Store.reviewComplainantEvidence(Number(b.dataset.acceptCe), me, 'accepted', '',
         document.getElementById('ce13').value);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast('Accepted as a formal exhibit.'); render();
@@ -557,10 +559,10 @@ function detail(id) {
   document.querySelectorAll('[data-reject-ce]').forEach(b => b.onclick = () => {
     openModal('Reject submitted evidence', `
       <div class="field"><label for="rjn">Reason <span class="req">*</span></label>
-        <textarea id="rjn" placeholder="Why this cannot be accepted as an exhibit."></textarea></div>`, () => {
+        <textarea id="rjn" placeholder="Why this cannot be accepted as an exhibit."></textarea></div>`, async () => {
       const note = document.getElementById('rjn').value.trim();
       if (!note) { toast('A reason is required to reject submitted evidence.', 'alert'); return false; }
-      const res = Store.reviewComplainantEvidence(Number(b.dataset.rejectCe), me, 'rejected', note);
+      const res = await Store.reviewComplainantEvidence(Number(b.dataset.rejectCe), me, 'rejected', note);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast('Rejected and recorded.'); render();
     }, 'Reject');
@@ -574,10 +576,10 @@ function detail(id) {
       <div class="field"><label for="tu">Transfer to <span class="req">*</span></label>
         <select id="tu">${others.map(u => `<option value="${u.id}">${esc(u.name)} — ${esc(labelRole(u.role))}</option>`).join('')}</select></div>
       <div class="field"><label for="tp">Purpose <span class="req">*</span></label>
-        <input type="text" id="tp" placeholder="e.g. forensic analysis"></div>`, () => {
+        <input type="text" id="tp" placeholder="e.g. forensic analysis"></div>`, async () => {
       const p = document.getElementById('tp').value.trim();
       if (!p) { toast('State the purpose of the transfer.', 'alert'); return false; }
-      Store.transferEvidence(Number(b.dataset.transfer), me, document.getElementById('tu').value, p);
+      if (!await Store.transferEvidence(Number(b.dataset.transfer), me, document.getElementById('tu').value, p)) return false;
       toast('Transfer logged, awaiting acknowledgement.'); render();
     }, 'Transfer');
   });

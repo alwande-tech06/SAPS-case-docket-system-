@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Withdrawal requests - Commander</title>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
 <div id="chrome"></div>
@@ -24,12 +25,13 @@
     </table></div>
   </div>
 </main>
-<script src="js/store.js"></script>
-<script src="js/app.js"></script>
+<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script src="{{ url_for('static', filename='js/store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script>
 const me = requireRole('commander');
 if (me) {
-  renderChrome('commander-withdrawals.html');
+  renderChrome('{{ url_for('pages.commander_withdrawals') }}');
   draw();
 }
 
@@ -68,10 +70,10 @@ function draw() {
           <option value="declined">Decline — the case continues</option>
         </select></div>
       <div class="field"><label for="decr">Reason for this decision <span class="req">*</span></label>
-        <textarea id="decr" placeholder="What you considered and why."></textarea></div>`, () => {
+        <textarea id="decr" placeholder="What you considered and why."></textarea></div>`, async () => {
       const reason = document.getElementById('decr').value.trim();
       if (!reason) { toast('A reason is required for every decision.', 'alert'); return false; }
-      const res = Store.decideWithdrawal(w.id, me, document.getElementById('dec').value, reason);
+      const res = await Store.decideWithdrawal(w.id, me, document.getElementById('dec').value, reason);
       if (!res.ok) { toast(res.error, 'alert'); return false; }
       toast('Decision recorded.'); draw();
     }, 'Record decision');

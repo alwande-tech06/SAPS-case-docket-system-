@@ -2,16 +2,6 @@
 
 renderPublicHeader();
 
-/* A browser that refuses site data still shows every screen, but a report filed
-   now will be gone on the next visit. Say so rather than letting someone trust
-   a reference number that will not be there tomorrow. */
-if (!Store.storageWorks()) {
-  document.getElementById('lookupError').innerHTML =
-    `<div class="notice notice-alert"><strong>This browser is not keeping your data</strong>
-      Reports filed in this browser will not be saved. Allow site data for this page, or open
-      it over http:// rather than as a file, then report again.</div>`;
-}
-
 let current = null;
 
 /* ---------------- arriving from a scanned QR code ----------------
@@ -20,7 +10,8 @@ let current = null;
    lost, photographed or picked up by somebody else, and what is behind it is
    private under the Victims' Charter. So the link identifies the report, and
    the person still has to prove they are the complainant: the ID number given
-   when reporting, then a one-time code to the number on the report. */
+   when reporting, then a one-time code sent to the number on the report. The
+   server checks both, and only then does the report reach this page. */
 const params = new URLSearchParams(location.search);
 const prefillRef = params.get('ref');
 const linkToken = params.get('t');
@@ -32,8 +23,8 @@ if (prefillRef && linkToken) {
   document.getElementById('fullname').focus();
 }
 
-function startLinkVerification(ref, token) {
-  const check = Store.trackLinkCheck(ref, token);
+async function startLinkVerification(ref, token) {
+  const check = await Store.fetchTrackLink(ref, token);
   const host = document.getElementById('result');
   const lookup = document.getElementById('lookup');
 
@@ -50,10 +41,8 @@ function startLinkVerification(ref, token) {
     return;
   }
 
-  Store.logTrackLinkAccess(check.intake_id, 'opened, verification started');
   lookup.hidden = true;
   host.hidden = false;
-  let otp = null;
 
   function drawIdStep(error) {
     host.innerHTML = `
@@ -70,33 +59,39 @@ function startLinkVerification(ref, token) {
         </div>
         <div class="btn-row">
           <button class="btn btn-primary" id="linkIdGo">Continue</button>
-          <a class="btn" href="track.html">Look up a different report</a>
+          <a class="btn" href="/track">Look up a different report</a>
         </div>
       </div>`;
     const go = document.getElementById('linkIdGo');
     const input = document.getElementById('linkId');
     input.focus();
     input.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
-    go.onclick = () => {
-      const res = Store.verifyTrackIdNumber(check.intake_id, input.value);
+    go.onclick = async () => {
+      if (go.disabled) return;
+      go.disabled = true;
+      const res = await Store.fetchTrackLink(ref, token, { id_number: input.value });
+      go.disabled = false;
       if (!res.ok) {
-        Store.logTrackLinkAccess(check.intake_id, 'ID number did not match');
-        drawIdStep('That is not the ID number recorded on this report.');
+        drawIdStep(res.code === 'id_mismatch' ? 'That is not the ID number recorded on this report.'
+          : res.error || 'The report could not be fetched. Check your connection and try again.');
         return;
       }
-      otp = String(Math.floor(100000 + Math.random() * 900000));
       drawOtpStep(res, null);
     };
   }
 
+  /* person: { name, demo_code } — demo_code only on a demonstration system,
+     which has no SMS and shows the code instead. */
   function drawOtpStep(person, error) {
     host.innerHTML = `
       <div class="card">
         <div class="card-head"><h2>Enter the code we sent you</h2></div>
         <div class="notice">
           <strong>Code sent to the number on this report</strong>
-          In the finished system this arrives by SMS. For this prototype it is shown here:
-          <span class="ref">${esc(otp)}</span>
+          ${person.demo_code
+            ? `This demonstration system does not send SMS, so the code is shown here:
+               <span class="ref">${esc(person.demo_code)}</span>`
+            : 'It arrives by SMS and expires in 10 minutes.'}
         </div>
         ${error ? `<div class="notice notice-alert"><strong>That code did not match</strong>${esc(error)}</div>` : ''}
         <div class="field">
@@ -105,34 +100,36 @@ function startLinkVerification(ref, token) {
         </div>
         <div class="btn-row">
           <button class="btn btn-primary" id="linkOtpGo">Show my report</button>
-          <a class="btn" href="track.html">Cancel</a>
+          <a class="btn" href="/track">Cancel</a>
         </div>
       </div>`;
     const go = document.getElementById('linkOtpGo');
     const input = document.getElementById('linkOtp');
     input.focus();
     input.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
-    go.onclick = () => {
-      if (input.value.trim() !== otp) {
-        Store.logTrackLinkAccess(check.intake_id, 'one-time code did not match');
-        drawOtpStep(person, 'Check the code and try again.');
+    go.onclick = async () => {
+      if (go.disabled) return;
+      go.disabled = true;
+      const res = await Store.fetchTrackLink(ref, token, { otp: input.value });
+      go.disabled = false;
+      if (!res.ok) {
+        drawOtpStep(person, res.error || 'Check the code and try again.');
         return;
       }
       /* Verified. From here it is the ordinary tracking view, opened through
          the same Store.track() everything else uses. */
-      Store.logTrackLinkAccess(check.intake_id, 'verified, report shown');
       document.getElementById('ref').value = prefillRef;
       document.getElementById('fullname').value = person.name;
       lookup.hidden = false;
-      const res = Store.track(prefillRef, person.name);
-      if (!res.ok) {
+      const found = Store.track(prefillRef, person.name);
+      if (!found.ok) {
         host.innerHTML = '';
         document.getElementById('lookupError').innerHTML =
           '<div class="notice notice-alert"><strong>No report found</strong>Look it up below.</div>';
         return;
       }
-      current = res;
-      render(res);
+      current = found;
+      render(found);
     };
   }
 
@@ -143,12 +140,12 @@ document.getElementById('find').onclick = doLookup;
 document.getElementById('ref').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
 document.getElementById('fullname').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
 
-function doLookup() {
+async function doLookup() {
   /* Whatever goes wrong, the complainant must see something happen. An
      unhandled error here leaves the button looking dead, which reads as the
      system ignoring them. */
   try {
-    runLookup();
+    await runLookup();
   } catch (e) {
     console.error(e);
     document.getElementById('result').hidden = true;
@@ -159,7 +156,7 @@ function doLookup() {
   }
 }
 
-function runLookup() {
+async function runLookup() {
   const ref = document.getElementById('ref').value.trim();
   const fullname = document.getElementById('fullname').value.trim();
   const box = document.getElementById('lookupError');
@@ -173,6 +170,9 @@ function runLookup() {
      person rather than one report, so they list everything they have filed. */
   const isIdNumber = /^\d{13}$/.test(ref.replace(/\D/g, '')) && !/[A-Za-z]/.test(ref);
   if (/^CMP-/i.test(ref) || isIdNumber) {
+    await Store.fetchTrack(isIdNumber
+      ? { id_number: ref, name: fullname }
+      : { complainant_number: ref, name: fullname });
     const list = isIdNumber
       ? Store.trackByIdNumber(ref, fullname)
       : Store.trackByComplainantNumber(ref, fullname);
@@ -188,6 +188,7 @@ function runLookup() {
     return;
   }
 
+  await Store.fetchTrack({ reference: ref, name: fullname });
   const res = Store.track(ref, fullname);
   if (!res.ok) {
     /* deliberately generic — never confirm which part was wrong */
@@ -239,6 +240,10 @@ function render(res) {
   const status = d ? labelStatus(d.current_status)
     : i.disposition === 'refused' ? 'Docket not opened'
     : i.disposition === 'referred' ? 'Referred to another station'
+    /* A docket opened in another browser: the report knows, but the docket
+       itself (and its case number) is not on the server yet. */
+    : i.disposition === 'docket_opened' ? 'Case opened'
+    : i.disposition === 'withdrawn' ? 'Withdrawn'
     : 'Awaiting police action';
 
   const events = [];
@@ -276,7 +281,7 @@ function render(res) {
 
   host.innerHTML = `
     <div class="evidence-row">
-      ${stampBlock(d ? 'Case number' : 'Report reference', ref, d ? 'Registered' : 'Pending')}
+      ${stampBlock(d ? 'Case number' : 'Report reference', ref, d || i.disposition === 'docket_opened' ? 'Registered' : 'Pending')}
       ${qrBlock(ref, 'Scan to track this case', i.track_token)}
     </div>
 
@@ -355,34 +360,35 @@ function render(res) {
   host.hidden = false;
 
   const btn = document.getElementById('escalate');
-  if (btn) btn.onclick = () => {
+  if (btn) btn.onclick = async () => {
     const reason = document.getElementById('escReason').value;
     if (!reason) { toast('Choose a reason so the commander knows what to look at.', 'alert'); return; }
     const detail = document.getElementById('escDetail').value.trim();
-    Store.raiseEscalation({
+    const raised = await Store.raiseEscalation({
       docket_id: res.docket ? res.docket.id : null,
       intake_id: res.docket ? null : res.intake.id,
       reason: detail ? `${reason} — ${detail}` : reason,
       raised_by_complainant: true
     });
+    if (!raised || raised.ok === false) return;
     toast('Escalation sent to the station commander.');
     render(Store.track(ref, document.getElementById('fullname').value.trim()));
   };
 
   const rbtn = document.getElementById('requestReopen');
-  if (rbtn) rbtn.onclick = () => {
-    const res = Store.requestReopenByComplainant(d.id, document.getElementById('reopenText').value);
+  if (rbtn) rbtn.onclick = async () => {
+    const res = await Store.requestReopenByComplainant(d.id, document.getElementById('reopenText').value);
     if (!res.ok) { toast(res.error, 'alert'); return; }
     toast('The case has been reopened and sent back for investigation.');
     render(Store.track(ref, document.getElementById('fullname').value.trim()));
   };
 
   const wbtn = document.getElementById('requestWithdrawal');
-  if (wbtn) wbtn.onclick = () => {
+  if (wbtn) wbtn.onclick = async () => {
     const cat = document.getElementById('wCat').value;
     if (!cat) { toast('Choose a reason so the request can be reviewed.', 'alert'); return; }
     const detail = document.getElementById('wDetail').value.trim();
-    const outcome = Store.requestWithdrawal(i.id, { reason_category: cat, reason_detail: detail });
+    const outcome = await Store.requestWithdrawal(i.id, { reason_category: cat, reason_detail: detail });
     if (!outcome.ok) { toast(outcome.error, 'alert'); return; }
     toast('Withdrawal request sent to the station commander.');
     render(Store.track(ref, document.getElementById('fullname').value.trim()));

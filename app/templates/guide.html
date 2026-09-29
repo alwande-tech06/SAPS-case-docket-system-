@@ -8,7 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 <style>
   /* Only what this page adds to the system stylesheet: the rule block, which
      is a card with the weight of the rule carried on its left edge. */
@@ -112,7 +113,7 @@
       <div class="masthead-sub">What the system requires, and why</div>
     </div>
     <div class="masthead-spacer"></div>
-    <a class="btn btn-sm" id="backLink" href="login.html" hidden>Back to dashboard</a>
+    <a class="btn btn-sm" id="backLink" href="{{ url_for('pages.login') }}" hidden>Back to dashboard</a>
   </div>
 </header>
 
@@ -549,7 +550,7 @@
   <h2>Dashboard helper snippet</h2>
   <p>Add this next to any disabled button so the user can see which rule is blocking it.</p>
   <pre>&lt;button disabled&gt;Request closure&lt;/button&gt;
-&lt;a class="why" href="guide.html?role=detective#rule-closure-diary" target="_blank"&gt;
+&lt;a class="why" href="{{ url_for('pages.guide') }}?role=detective#rule-closure-diary" target="_blank"&gt;
   Why is this blocked?
 &lt;/a&gt;</pre>
   <p>In this system the dashboards do not hard-code that anchor. The data layer returns a
@@ -570,9 +571,9 @@
 (function () {
   var params = new URLSearchParams(location.search);
   var STAFF = {
-    official:  { label: 'Police Official',   dash: 'dashboard-official.html' },
-    detective: { label: 'Detective',         dash: 'dashboard-detective.html' },
-    commander: { label: 'Station Commander', dash: 'dashboard-commander.html' }
+    official:  { label: 'Police Official',   dash: '{{ url_for('pages.dashboard_official') }}' },
+    detective: { label: 'Detective',         dash: '{{ url_for('pages.dashboard_detective') }}' },
+    commander: { label: 'Station Commander', dash: '{{ url_for('pages.dashboard_commander') }}' }
   };
 
   // ?role= is who is reading. ?view=rules opens the Regulations tab without

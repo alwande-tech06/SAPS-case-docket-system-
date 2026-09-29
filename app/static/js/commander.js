@@ -1,7 +1,7 @@
 /* commander.js — oversight dashboard */
 
 const me = requireRole('commander');
-if (me) { renderChrome('dashboard-commander.html'); render(); }
+if (me) { renderChrome('/dashboard-commander'); render(); }
 
 function render() {
   const st = me.station_id;
@@ -173,11 +173,11 @@ function wire() {
           <option>Referred to provincial oversight / IPID</option>
         </select></div>
       <div class="field"><label for="or">Reason for this outcome <span class="req">*</span></label>
-        <textarea id="or" placeholder="What you found and what you have directed."></textarea></div>`, () => {
+        <textarea id="or" placeholder="What you found and what you have directed."></textarea></div>`, async () => {
       const oc = document.getElementById('oc').value;
       const or = document.getElementById('or').value.trim();
       if (!oc || !or) { toast('Both the outcome and the reason are required.', 'alert'); return false; }
-      const res = Store.respondEscalation(e.id, me, oc, or);
+      const res = await Store.respondEscalation(e.id, me, oc, or);
       if (res && res.ok === false) { toast(res.error, 'alert'); render(); return; }
       toast('Response recorded and the complainant updated.');
       render();
@@ -243,8 +243,8 @@ function wire() {
         <button class="btn btn-primary" id="rejectClosure">Refuse — send it back</button>
       </div>`, () => {}, 'Close without deciding');
 
-    const decide = decision => {
-      const res = Store.decideClosure(c.id, me, decision, document.getElementById('cdr').value);
+    const decide = async decision => {
+      const res = await Store.decideClosure(c.id, me, decision, document.getElementById('cdr').value);
       if (!res.ok) {
         toast(res.error, 'alert');
         const host = document.getElementById('closureErr');
@@ -272,13 +272,14 @@ function wire() {
       <div class="field">
         <label for="bfr">New evidence or information, if any</label>
         <textarea id="bfr" placeholder="Leave empty to note the review and keep the docket filed."></textarea>
-      </div>`, () => {
+      </div>`, async () => {
       const text = document.getElementById('bfr').value.trim();
       if (!text) {
-        Store.noteBroughtForwardReview(d.id, me);
+        const res = await Store.noteBroughtForwardReview(d.id, me);
+        if (!res.ok) { toast(res.error, 'alert'); return false; }
         toast('Review recorded. The docket stays filed.');
       } else {
-        const res = Store.reopenDocket(d.id, me, { trigger: 'manual', new_evidence: text });
+        const res = await Store.reopenDocket(d.id, me, { trigger: 'manual', new_evidence: text });
         if (!res.ok) { toast(res.error, 'alert'); return false; }
         toast('Case reopened and the complainant notified.');
       }
@@ -310,8 +311,8 @@ function wire() {
         </select></div>
       <div class="field"><label for="rr2">Detail <span class="req">*</span> <span class="small muted">(required for "Other")</span></label>
         <textarea id="rr2" style="min-height:80px"></textarea></div>
-      <div id="reassignErr"></div>`, () => {
-      const res = Store.reassign(d.id, document.getElementById('rd').value, me,
+      <div id="reassignErr"></div>`, async () => {
+      const res = await Store.reassign(d.id, document.getElementById('rd').value, me,
         document.getElementById('rcat2').value, document.getElementById('rr2').value);
       if (!res.ok) {
         toast(res.error, 'alert');
@@ -323,7 +324,7 @@ function wire() {
         return res.routedToCluster ? undefined : false;
       }
       if (d.current_status === 'awaiting_assignment') {
-        Store.updateStatus(d.id, 'registered', me, 'Allocated by commander');
+        await Store.updateStatus(d.id, 'registered', me, 'Allocated by commander');
       }
       toast(`Docket allocated to ${res.detective.name} and the complainant notified.`);
       render();
@@ -468,9 +469,9 @@ function renderCosignQueue() {
     noteBox.oninput = refresh;
     refresh();
 
-    submit.onclick = () => {
+    submit.onclick = async () => {
       const dr = draft();
-      const res = Store.cosignRefusal(r.id, me, dr.decision === 'agree', dr.note,
+      const res = await Store.cosignRefusal(r.id, me, dr.decision === 'agree', dr.note,
         { definition_checked: dr.definition_checked });
       if (!res.ok) {
         toast(res.error, 'alert');
@@ -479,7 +480,7 @@ function renderCosignQueue() {
         return;
       }
       if (res.mustOpenDocket) {
-        const opened = Store.openDocket(i.id, me);
+        const opened = await Store.openDocket(i.id, me);
         closeModal();
         toast(opened
           ? `Decision reversed. ${opened.docket.cas_number} opened and the complainant notified.`
