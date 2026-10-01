@@ -27,6 +27,9 @@ def create_app(config_name=None):
                                                         and app.config['SMTP_USERNAME']):
         app.logger.warning('EMAIL_PROVIDER=smtp but SMTP_HOST, SMTP_USERNAME or SMTP_FROM is missing: '
                            'password-reset emails will not be sent.')
+    if app.config['SMS_PROVIDER'] == 'bulksms' and not (app.config['BULKSMS_USERNAME'] and app.config['BULKSMS_PASSWORD']):
+        app.logger.warning('SMS_PROVIDER=bulksms but BULKSMS_USERNAME or BULKSMS_PASSWORD is missing: '
+                           'one-time codes cannot be sent.')
     if config_name == 'production':
         if app.config['SECRET_KEY'] in ('', 'dev-only-change-me', 'CHANGE_ME') or len(app.config['SECRET_KEY']) < 32:
             raise RuntimeError('Set SECRET_KEY to a long random value before running in production.')
@@ -161,6 +164,23 @@ def _register_cli(app):
         from .services.oversight import escalate_overdue
         raised = escalate_overdue()
         click.echo(f'Escalated {len(raised)} overdue report(s)' + (': ' + ', '.join(raised) if raised else '.'))
+
+    @app.cli.command('sms-check')
+    def sms_check():
+        """Check the BulkSMS token and show the credit balance. Sends nothing."""
+        import urllib.error
+        from .services.otp import bulksms_profile
+        if not (app.config.get('BULKSMS_USERNAME') and app.config.get('BULKSMS_PASSWORD')):
+            raise click.ClickException('Set BULKSMS_USERNAME (Token Id) and BULKSMS_PASSWORD (Token Secret) first.')
+        try:
+            profile = bulksms_profile()
+        except urllib.error.HTTPError as e:
+            raise click.ClickException(f'BulkSMS refused the token (HTTP {e.code}). Check the Token Id and Secret.')
+        except urllib.error.URLError as e:
+            raise click.ClickException(f'BulkSMS could not be reached: {e.reason}')
+        credits = (profile.get('credits') or {}).get('balance')
+        click.echo(f'BulkSMS token works for {profile.get("username", "the account")}. Credits left: {credits}. '
+                   f'SMS_PROVIDER is "{app.config["SMS_PROVIDER"]}".')
 
     @app.cli.command('verify-audit')
     def verify_audit():

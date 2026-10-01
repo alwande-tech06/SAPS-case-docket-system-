@@ -185,6 +185,9 @@ def reset_password():
 
 # ----- reporting -----
 
+SMS_FAILED = ('We could not send the code to your phone just now. Check the number and try again in a few '
+              'minutes, or report at your nearest police station.')
+
 @bp.post('/otp/report')
 @rate_limit('otp', 5, 600)
 def otp_for_report():
@@ -195,7 +198,11 @@ def otp_for_report():
     except intake_svc.ValidationError as e:
         return error(str(e), 'invalid', 400)
     contact = ''.join(ch for ch in str(data['contact']) if ch.isdigit() or ch == '+')
-    code = otp.issue('report', contact)
+    try:
+        code = otp.issue('report', contact)
+    except otp.SmsError:
+        db.session.rollback()
+        return error(SMS_FAILED, 'sms_failed', 503)
     db.session.commit()
     return jsonify({'ok': True, 'demo_code': code})
 
@@ -281,7 +288,11 @@ def track_link():
                   entity_id=intake.id, case_id=intake.docket_id)
             db.session.commit()
             return error('That is not the ID number recorded on this report.', 'id_mismatch', 403)
-        code = otp.issue('track', comp.contact, subject=str(intake.id))
+        try:
+            code = otp.issue('track', comp.contact, subject=str(intake.id))
+        except otp.SmsError:
+            db.session.rollback()
+            return error(SMS_FAILED, 'sms_failed', 503)
         db.session.commit()
         return jsonify({'ok': True, 'name': comp.name, 'demo_code': code})
     audit('view', f'Tracking link for {intake.intake_number}: opened, verification started', entity_type='intake',

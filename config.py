@@ -33,6 +33,8 @@ def database_url():
 
 
 MAIL_HOST = env('SMTP_HOST', 'MAIL_SERVER')
+# A BulkSMS API token (Token Id / Token Secret) switches one-time codes to real SMS.
+BULKSMS_TOKEN = env('BULKSMS_USERNAME', 'BULKSMS_TOKEN_ID')
 
 
 class Config:
@@ -47,7 +49,10 @@ class Config:
     # The "Reset demonstration data" button on the sign-in page. Off unless
     # asked for; never on for a real deployment.
     DEMO_MODE = flag('DEMO_MODE', False)
-    SMS_PROVIDER = env('SMS_PROVIDER', default='demo')
+    SMS_PROVIDER = env('SMS_PROVIDER', default='bulksms' if BULKSMS_TOKEN else 'demo')
+    BULKSMS_USERNAME = BULKSMS_TOKEN
+    BULKSMS_PASSWORD = env('BULKSMS_PASSWORD', 'BULKSMS_TOKEN_SECRET')
+    BULKSMS_SENDER = env('BULKSMS_SENDER')      # optional; only a sender ID registered with BulkSMS
     RATELIMIT_ENABLED = flag('RATELIMIT_ENABLED', True)
 
     # Password-reset emails: demo (link shown on screen), console (server log) or
@@ -84,12 +89,13 @@ class TestingConfig(Config):
     SCHEDULER_ENABLED = False
     # Never the developer's real mail settings from .env.
     PUBLIC_BASE_URL = SMTP_HOST = SMTP_USERNAME = SMTP_PASSWORD = SMTP_FROM = None
+    BULKSMS_USERNAME = BULKSMS_PASSWORD = BULKSMS_SENDER = None
 
 
 class ProductionConfig(Config):
     DEBUG = False
     SESSION_COOKIE_SECURE = True
-    SMS_PROVIDER = env('SMS_PROVIDER', default='console')
+    SMS_PROVIDER = env('SMS_PROVIDER', default='bulksms' if BULKSMS_TOKEN else 'console')
     EMAIL_PROVIDER = env('EMAIL_PROVIDER', default='smtp' if MAIL_HOST else 'console')
 
 

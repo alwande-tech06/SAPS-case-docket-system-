@@ -38,7 +38,7 @@ app/scheduler.py            In-app timer for the overdue-report escalation
 app/seed.py                 Reference data and the demonstration data
 app/templates/, app/static/ The pages
 migrations/                 Database schema (Alembic)
-tests/                      109 tests, run with pytest
+tests/                      117 tests, run with pytest
 ```
 
 ## Running it locally
@@ -149,7 +149,7 @@ FLASK_CONFIG=production
 DATABASE_URL=postgresql://...          # the production database
 SECRET_KEY=<64 random hex characters>  # python -c "import secrets; print(secrets.token_hex(32))"
 DEMO_MODE=false
-SMS_PROVIDER=<your gateway>            # see "One-time codes" below
+BULKSMS_USERNAME=... BULKSMS_PASSWORD=...  # SMS one-time codes, see below
 EMAIL_PROVIDER=smtp                    # see "Password resets" below
 SMTP_HOST=... SMTP_PORT=587 SMTP_USERNAME=... SMTP_PASSWORD=... SMTP_FROM=...
 PUBLIC_BASE_URL=https://<your site>    # for the links in emails
@@ -194,10 +194,14 @@ the complainant's phone. `SMS_PROVIDER` decides how:
 
 - `demo` — shown on the page. Demonstrations only.
 - `console` — written to the server log. For testing a production build.
-- anything else — connect your SMS gateway (for example Clickatell, BulkSMS or
-  Twilio) in `send_sms()` in `app/services/otp.py`. **This is required before
-  the public can use the site**; until then nobody can report online or open a
-  tracking link.
+- `bulksms` — sent by SMS through [BulkSMS](https://www.bulksms.com). Create an
+  API token there (Settings → API Tokens) and set `BULKSMS_USERNAME` = Token Id
+  and `BULKSMS_PASSWORD` = Token Secret; with those set, `bulksms` is chosen
+  automatically. `flask sms-check` confirms the token and shows the credit
+  balance without sending anything. Each code costs one credit. If a message
+  cannot be sent (no credits, gateway down), the person is told to try again
+  and the error is logged. **Real SMS is required before the public can use
+  the site**; on `console` nobody can receive a code.
 
 Codes are kept hashed in the database, expire after 10 minutes, and allow five
 attempts.

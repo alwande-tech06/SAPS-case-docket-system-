@@ -7,13 +7,19 @@ guesses. How the code reaches the phone is SMS_PROVIDER:
 
   demo     — returned to the page and shown on screen (the prototype's behaviour)
   console  — written to the server log, for testing without an SMS account
-  (other)  — plug a real gateway into send_sms() below
+  bulksms  — sent by SMS through BulkSMS (bulksms.com), with the API token in
+             BULKSMS_USERNAME (Token Id) and BULKSMS_PASSWORD (Token Secret)
 
 Never run a public deployment on 'demo': anyone could "verify" any number.
 """
+import base64
 import hashlib
 import hmac
+import json
+import re
 import secrets
+import urllib.error
+import urllib.request
 from datetime import timedelta, timezone
 
 from flask import current_app, session
@@ -23,10 +29,59 @@ from ..models import OtpChallenge, utcnow
 
 TTL = timedelta(minutes=10)
 MAX_ATTEMPTS = 5
+BULKSMS_URL = 'https://api.bulksms.com/v1/messages'
+
+
+class SmsError(Exception):
+    """The code could not be sent; the person is asked to try again."""
 
 
 def _digest(code):
     return hmac.new(current_app.config['SECRET_KEY'].encode(), str(code).encode(), hashlib.sha256).hexdigest()
+
+
+def international(number):
+    """A South African number as an SMS gateway wants it: 082 555 0141 → +27825550141."""
+    digits = re.sub(r'[^\d+]', '', str(number or ''))
+    if digits.startswith('+'):
+        return digits
+    if digits.startswith('27') and len(digits) == 11:
+        return '+' + digits
+    if digits.startswith('0') and len(digits) == 10:
+        return '+27' + digits[1:]
+    return digits
+
+
+def _bulksms(number, message):
+    cfg = current_app.config
+    token_id, secret = cfg.get('BULKSMS_USERNAME'), cfg.get('BULKSMS_PASSWORD')
+    if not token_id or not secret:
+        raise SmsError('BULKSMS_USERNAME and BULKSMS_PASSWORD are not set.')
+    payload = {'to': international(number), 'body': message}
+    if cfg.get('BULKSMS_SENDER'):
+        payload['from'] = cfg['BULKSMS_SENDER']     # only a sender ID registered with BulkSMS
+    auth = base64.b64encode(f'{token_id}:{secret}'.encode()).decode()
+    req = urllib.request.Request(BULKSMS_URL, data=json.dumps(payload).encode(), method='POST',
+                                 headers={'Content-Type': 'application/json', 'Authorization': f'Basic {auth}'})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status not in (200, 201):
+                raise SmsError(f'BulkSMS answered HTTP {resp.status}')
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors='replace')[:300]
+        raise SmsError(f'BulkSMS refused the message (HTTP {e.code}): {detail}') from e
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise SmsError(f'BulkSMS could not be reached: {e}') from e
+
+
+def bulksms_profile():
+    """The BulkSMS account behind the token, without sending anything — for
+    checking the token and the credit balance."""
+    cfg = current_app.config
+    auth = base64.b64encode(f'{cfg.get("BULKSMS_USERNAME")}:{cfg.get("BULKSMS_PASSWORD")}'.encode()).decode()
+    req = urllib.request.Request('https://api.bulksms.com/v1/profile', headers={'Authorization': f'Basic {auth}'})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode())
 
 
 def send_sms(number, message):
@@ -37,19 +92,26 @@ def send_sms(number, message):
         # Warning level, so it appears in a production log (which hides info).
         current_app.logger.warning('SMS to %s: %s', number, message)
         return
-    raise RuntimeError(f'SMS provider "{provider}" is not configured. See app/services/otp.py.')
+    if provider == 'bulksms':
+        return _bulksms(number, message)
+    raise SmsError(f'SMS provider "{provider}" is not supported. Use bulksms, console or demo.')
 
 
 def issue(purpose, contact, subject=None):
     """Sends a fresh code for `purpose` ('report' or 'track') to `contact`.
-    Returns the code itself only in demo mode, for the page to show."""
+    Returns the code itself only in demo mode, for the page to show. Raises
+    SmsError when the message could not be sent."""
     code = f'{secrets.randbelow(900000) + 100000}'
     rec = OtpChallenge(purpose=purpose, contact=contact, subject=subject, digest=_digest(code),
                        expires_at=utcnow() + TTL, attempts=0, used=False)
     db.session.add(rec)
     db.session.flush()
+    try:
+        send_sms(contact, f'Your SAPS verification code is {code}. It expires in 10 minutes.')
+    except SmsError:
+        current_app.logger.exception('One-time code to %s could not be sent', contact)
+        raise
     session[f'otp_{purpose}'] = rec.id
-    send_sms(contact, f'Your SAPS verification code is {code}. It expires in 10 minutes.')
     return code if current_app.config.get('SMS_PROVIDER', 'demo') == 'demo' else None
 
 

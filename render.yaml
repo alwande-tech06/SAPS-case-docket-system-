@@ -23,10 +23,16 @@ services:
       # Escalate reports undisposed for 24 hours from inside the app.
       - key: SCHEDULER_ENABLED
         value: "true"
-      # How one-time codes reach a phone. "demo" shows them on screen — fine
-      # for a marked demonstration, never for real use. See app/services/otp.py.
+      # One-time codes by real SMS: the BulkSMS API token (Token Id / Token
+      # Secret). With these set, codes go by SMS automatically.
+      - key: BULKSMS_USERNAME
+        sync: false
+      - key: BULKSMS_PASSWORD
+        sync: false
+      # Leave empty when the BulkSMS token is set. Without a token, "demo"
+      # shows the codes on screen — fine for a marked demonstration only.
       - key: SMS_PROVIDER
-        value: demo
+        sync: false
       # First deploy only (ignored once accounts exist): either load the demo
       # data with SEED_DEMO_DATA=true, or create the first administrator.
       - key: SEED_DEMO_DATA
