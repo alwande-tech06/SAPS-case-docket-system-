@@ -33,9 +33,14 @@ def create_app(config_name=None):
     if config_name == 'production':
         if app.config['SECRET_KEY'] in ('', 'dev-only-change-me', 'CHANGE_ME') or len(app.config['SECRET_KEY']) < 32:
             raise RuntimeError('Set SECRET_KEY to a long random value before running in production.')
-        if app.config['DEMO_MODE'] or app.config['SMS_PROVIDER'] == 'demo' or app.config['EMAIL_PROVIDER'] == 'demo':
-            app.logger.warning('DEMO_MODE, SMS_PROVIDER=demo or EMAIL_PROVIDER=demo is on in production: codes and '
-                               'reset links are shown on screen. Turn them off for real use.')
+        on = [what for what, is_on in (
+            ('SMS_PROVIDER=demo (one-time codes shown on screen)', app.config['SMS_PROVIDER'] == 'demo'),
+            ('EMAIL_PROVIDER=demo (reset links shown on screen)', app.config['EMAIL_PROVIDER'] == 'demo'),
+            ('DEMO_MODE=true ("Reset demonstration data" button on the sign-in page)', app.config['DEMO_MODE']),
+        ) if is_on]
+        if on:
+            app.logger.warning('Demonstration setting(s) on in production: %s. Fine for a demonstration; '
+                               'turn off before real use.', '; '.join(on))
         if app.config['EMAIL_PROVIDER'] == 'smtp' and not (app.config['SMTP_HOST'] and app.config['SMTP_FROM']):
             raise RuntimeError('EMAIL_PROVIDER=smtp needs SMTP_HOST and SMTP_FROM.')
         # Behind a reverse proxy (nginx, a cloud load balancer) that terminates HTTPS.
