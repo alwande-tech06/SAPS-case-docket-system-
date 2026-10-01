@@ -27,6 +27,8 @@ def create_app(config_name=None):
                                                         and app.config['SMTP_USERNAME']):
         app.logger.warning('EMAIL_PROVIDER=smtp but SMTP_HOST, SMTP_USERNAME or SMTP_FROM is missing: '
                            'password-reset emails will not be sent.')
+    if app.config['SMS_PROVIDER'] == 'email' and not app.config.get('OTP_EMAIL_TO'):
+        app.logger.warning('SMS_PROVIDER=email but OTP_EMAIL_TO is not set: one-time codes cannot be sent.')
     if app.config['SMS_PROVIDER'] == 'bulksms' and not (app.config['BULKSMS_USERNAME'] and app.config['BULKSMS_PASSWORD']):
         app.logger.warning('SMS_PROVIDER=bulksms but BULKSMS_USERNAME or BULKSMS_PASSWORD is missing: '
                            'one-time codes cannot be sent.')
@@ -35,6 +37,8 @@ def create_app(config_name=None):
             raise RuntimeError('Set SECRET_KEY to a long random value before running in production.')
         on = [what for what, is_on in (
             ('SMS_PROVIDER=demo (one-time codes shown on screen)', app.config['SMS_PROVIDER'] == 'demo'),
+            ('SMS_PROVIDER=email (one-time codes emailed to one inbox, OTP_EMAIL_TO)',
+             app.config['SMS_PROVIDER'] == 'email'),
             ('EMAIL_PROVIDER=demo (reset links shown on screen)', app.config['EMAIL_PROVIDER'] == 'demo'),
             ('DEMO_MODE=true ("Reset demonstration data" button on the sign-in page)', app.config['DEMO_MODE']),
         ) if is_on]

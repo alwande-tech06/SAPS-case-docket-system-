@@ -29,9 +29,12 @@ services:
         sync: false
       - key: BULKSMS_PASSWORD
         sync: false
-      # Leave empty when the BulkSMS token is set. Without a token, "demo"
-      # shows the codes on screen — fine for a marked demonstration only.
+      # Leave empty when the BulkSMS token (with credits) is set. For a
+      # demonstration: "email" sends codes to OTP_EMAIL_TO, "demo" shows them
+      # on screen.
       - key: SMS_PROVIDER
+        sync: false
+      - key: OTP_EMAIL_TO
         sync: false
       # First deploy only (ignored once accounts exist): either load the demo
       # data with SEED_DEMO_DATA=true, or create the first administrator.

@@ -9,6 +9,8 @@ guesses. How the code reaches the phone is SMS_PROVIDER:
   console  — written to the server log, for testing without an SMS account
   bulksms  — sent by SMS through BulkSMS (bulksms.com), with the API token in
              BULKSMS_USERNAME (Token Id) and BULKSMS_PASSWORD (Token Secret)
+  email    — demonstrations: emailed to the one inbox in OTP_EMAIL_TO, standing
+             in for the phone (uses the same mail settings as password resets)
 
 Never run a public deployment on 'demo': anyone could "verify" any number.
 """
@@ -94,7 +96,25 @@ def send_sms(number, message):
         return
     if provider == 'bulksms':
         return _bulksms(number, message)
-    raise SmsError(f'SMS provider "{provider}" is not supported. Use bulksms, console or demo.')
+    if provider == 'email':
+        return _by_email(number, message)
+    raise SmsError(f'SMS provider "{provider}" is not supported. Use bulksms, email, console or demo.')
+
+
+def _by_email(number, message):
+    """For a demonstration without SMS credits: the text goes by email to one
+    inbox (OTP_EMAIL_TO) standing in for the complainant's phone. It still
+    reaches a device the official cannot see; production uses bulksms."""
+    from .mail import send_email
+    to = current_app.config.get('OTP_EMAIL_TO')
+    if not to:
+        raise SmsError('SMS_PROVIDER=email needs OTP_EMAIL_TO, the inbox standing in for the phone.')
+    try:
+        send_email(to, f'SAPS verification code for {number}',
+                   f'{message}\n\n(This system is in demonstration mode: text messages to {number} are '
+                   'delivered to this inbox instead. In production they go by SMS.)')
+    except Exception as e:
+        raise SmsError(f'The code could not be emailed: {e}') from e
 
 
 def issue(purpose, contact, subject=None):

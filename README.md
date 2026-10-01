@@ -38,7 +38,7 @@ app/scheduler.py            In-app timer for the overdue-report escalation
 app/seed.py                 Reference data and the demonstration data
 app/templates/, app/static/ The pages
 migrations/                 Database schema (Alembic)
-tests/                      117 tests, run with pytest
+tests/                      119 tests, run with pytest
 ```
 
 ## Running it locally
@@ -194,6 +194,9 @@ the complainant's phone. `SMS_PROVIDER` decides how:
 
 - `demo` — shown on the page. Demonstrations only.
 - `console` — written to the server log. For testing a production build.
+- `email` — for demonstrations without SMS credits: every code is emailed to the
+  one inbox in `OTP_EMAIL_TO` (using the password-reset mail settings), standing
+  in for the complainant's phone. The code still never appears on the page.
 - `bulksms` — sent by SMS through [BulkSMS](https://www.bulksms.com). Create an
   API token there (Settings → API Tokens) and set `BULKSMS_USERNAME` = Token Id
   and `BULKSMS_PASSWORD` = Token Secret; with those set, `bulksms` is chosen

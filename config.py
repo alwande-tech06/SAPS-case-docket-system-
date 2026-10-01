@@ -53,6 +53,8 @@ class Config:
     BULKSMS_USERNAME = BULKSMS_TOKEN
     BULKSMS_PASSWORD = env('BULKSMS_PASSWORD', 'BULKSMS_TOKEN_SECRET')
     BULKSMS_SENDER = env('BULKSMS_SENDER')      # optional; only a sender ID registered with BulkSMS
+    # SMS_PROVIDER=email (demonstrations): the inbox that stands in for every phone.
+    OTP_EMAIL_TO = env('OTP_EMAIL_TO')
     RATELIMIT_ENABLED = flag('RATELIMIT_ENABLED', True)
 
     # Password-reset emails: demo (link shown on screen), console (server log) or
@@ -89,7 +91,7 @@ class TestingConfig(Config):
     SCHEDULER_ENABLED = False
     # Never the developer's real mail settings from .env.
     PUBLIC_BASE_URL = SMTP_HOST = SMTP_USERNAME = SMTP_PASSWORD = SMTP_FROM = None
-    BULKSMS_USERNAME = BULKSMS_PASSWORD = BULKSMS_SENDER = None
+    BULKSMS_USERNAME = BULKSMS_PASSWORD = BULKSMS_SENDER = OTP_EMAIL_TO = None
 
 
 class ProductionConfig(Config):

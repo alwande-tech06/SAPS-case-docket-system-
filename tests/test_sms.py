@@ -76,6 +76,35 @@ def test_a_failed_send_gives_a_clear_message_not_a_crash(app, client, bulksms, m
         assert 'otp_report' not in s
 
 
+@pytest.fixture
+def otp_by_email(app, monkeypatch):
+    mailed = []
+    import app.services.mail as mail
+    monkeypatch.setattr(mail, 'send_email', lambda to, subject, body: mailed.append((to, subject, body)))
+    app.config.update(SMS_PROVIDER='email', OTP_EMAIL_TO='presenter@example.org')
+    return mailed
+
+
+def test_demo_codes_can_go_by_email_to_one_inbox(client, otp_by_email):
+    r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',
+                                             'id_number': '9001015009087'})
+    assert r.json == {'ok': True, 'demo_code': None}            # still never on the page
+    to, subject, body = otp_by_email[0]
+    assert to == 'presenter@example.org' and subject == 'SAPS verification code for 0825550199'
+    code = body.split('code is ')[1][:6]
+    filed = client.post('/api/intakes', json={
+        'name': 'Zanele Mokoena', 'contact': '082 555 0199', 'id_number': '9001015009087', 'category_id': 1,
+        'location': 'Berea', 'description': 'Phone taken.', 'incident_datetime': '2026-09-28T08:00:00Z', 'otp': code})
+    assert filed.status_code == 201
+
+
+def test_email_codes_without_an_inbox_fail_clearly(app, client, otp_by_email):
+    app.config['OTP_EMAIL_TO'] = None
+    r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',
+                                             'id_number': '9001015009087'})
+    assert r.status_code == 503 and not otp_by_email
+
+
 def test_missing_token_is_a_failed_send(app, client, bulksms):
     app.config['BULKSMS_PASSWORD'] = None
     r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',
