@@ -145,6 +145,8 @@ class Complainant(Record, db.Model):
     complainant_number = db.Column(db.String(20), nullable=False, unique=True)
     name = db.Column(db.String(120), nullable=False)
     contact = db.Column(db.String(20), nullable=False)
+    # Optional. When given, one-time codes go here instead of by SMS.
+    email = db.Column(db.String(254))
     id_number = db.Column(db.String(13), index=True)
     gender = db.Column(db.String(20))
     verified_at = ts()
@@ -464,7 +466,7 @@ class OtpChallenge(db.Model):
     __tablename__ = 'otp_challenges'
     id = db.Column(db.Integer, primary_key=True)
     purpose = db.Column(db.String(20), nullable=False)
-    contact = db.Column(db.String(20), nullable=False)
+    contact = db.Column(db.String(254), nullable=False)   # a phone number or an email address
     subject = db.Column(db.String(60))
     digest = db.Column(db.String(64), nullable=False)
     expires_at = ts(nullable=False)

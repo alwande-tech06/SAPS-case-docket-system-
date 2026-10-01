@@ -8,6 +8,7 @@ import os
 
 import click
 from flask import Flask, jsonify, request
+from sqlalchemy.exc import DataError
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -70,6 +71,17 @@ def _register_errors(app):
         if request.path.startswith('/api/'):
             return jsonify({'ok': False, 'error': e.description, 'code': e.name.lower().replace(' ', '_')}), e.code
         return e
+
+    @app.errorhandler(DataError)
+    def bad_value(e):
+        # PostgreSQL refuses a value that does not fit its column (usually text
+        # longer than the field allows). That is the person's input, not a fault.
+        db.session.rollback()
+        app.logger.warning('Value refused by the database on %s: %s', request.path, e.orig)
+        message = 'One of the values is too long or not in the right form. Shorten it and try again.'
+        if request.path.startswith('/api/'):
+            return jsonify({'ok': False, 'error': message, 'code': 'invalid'}), 400
+        return message, 400
 
     @app.errorhandler(Exception)
     def unhandled(e):

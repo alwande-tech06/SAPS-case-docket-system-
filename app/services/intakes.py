@@ -76,6 +76,16 @@ def get_intake(intake_id, actor):
 
 # ----- filing -----
 
+def clean_email(value):
+    """An optional email address: None when blank, lower-cased when valid."""
+    email = text(value).lower()
+    if not email:
+        return None
+    if len(email) > 254 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[a-z]{2,}', email):
+        raise ValidationError('That email address is not complete. Check it, or leave it empty.')
+    return email
+
+
 def validate_contact(name, contact, id_number):
     if len(text(name).split()) < 2:
         raise ValidationError('Enter both a first name and a surname.')
@@ -107,6 +117,7 @@ def create_intake(data, actor=None):
     if missing:
         raise ValidationError('Still needed: ' + ', '.join(missing))
     age = validate_contact(name, contact, id_number)
+    email = clean_email(data.get('email'))
     # A minor reports in person, where a guardian can be recorded.
     if actor is None and age < 18:
         raise ValidationError('You must be 18 or older to report online.')
@@ -123,13 +134,15 @@ def create_intake(data, actor=None):
     if comp is None:
         n = Counter.next('complainant')
         comp = Complainant(complainant_number=f'CMP-{n:06d}', name=name, contact=contact, id_number=id_number,
-                           gender=data.get('gender') or None, verified_at=when)
+                           email=email, gender=data.get('gender') or None, verified_at=when)
         db.session.add(comp)
         db.session.flush()
     else:
         comp.name, comp.contact, comp.verified_at = name, contact, when
         if data.get('gender'):
             comp.gender = data['gender']
+        if email:                        # a report without one keeps the address already on file
+            comp.email = email
 
     suspect = data.get('suspect') or {}
     if suspect.get('description') or suspect.get('name'):

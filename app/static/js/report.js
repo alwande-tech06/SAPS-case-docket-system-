@@ -258,10 +258,14 @@ document.getElementById('sendOtp').onclick = async () => {
   if (sendBtn.disabled) return;
   const name = document.getElementById('name').value.trim();
   const contact = document.getElementById('contact').value.trim();
+  const email = document.getElementById('email').value.trim();
   const idNumber = document.getElementById('idnum').value.trim();
   if (!hasNameAndSurname(name)) { toast('Enter both your first name and surname.', 'alert'); return; }
   if (!document.querySelector('input[name="gender"]:checked')) { toast('Select your gender.', 'alert'); return; }
   if (!isValidSaMobile(contact)) { toast('Enter a valid South African mobile number, e.g. 082 555 0141.', 'alert'); return; }
+  if (email && !/^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(email)) {
+    toast('That email address is not complete. Check it, or leave it empty.', 'alert'); return;
+  }
   if (!/^\d{13}$/.test(idNumber)) { toast('Enter your 13-digit South African ID number.', 'alert'); return; }
 
   const age = ageFromSaId(idNumber);
@@ -273,20 +277,35 @@ document.getElementById('sendOtp').onclick = async () => {
     return;
   }
 
-  /* The server sends the code and keeps it; this page never knows it, except
-     on a demonstration system with no SMS, where it is shown instead. */
+  /* The server sends the code — to the email if one was given, otherwise by
+     SMS — and keeps it; this page never knows it, except on a demonstration
+     system that cannot deliver it, where it is shown instead. */
   sendBtn.disabled = true;
-  const sent = await Store.sendReportOtp({ name, contact, id_number: idNumber });
+  sendBtn.textContent = 'Sending…';
+  const sent = await Store.sendReportOtp({ name, contact, email, id_number: idNumber });
   sendBtn.disabled = false;
+  sendBtn.textContent = document.getElementById('otpBox').hidden ? 'Send code' : 'Resend code';
   if (!sent.ok) { toast(sent.error, 'alert'); return; }
   document.getElementById('otpDemo').hidden = !sent.demo_code;
   document.getElementById('otpSent').hidden = !!sent.demo_code;
   document.getElementById('otpShown').textContent = sent.demo_code || '';
+  document.getElementById('otpWhere').textContent = sent.sent_to
+    ? (sent.sent_to.channel === 'email' ? `your email, ${sent.sent_to.to}` : `${sent.sent_to.to} by SMS`) : 'you';
   document.getElementById('otpBox').hidden = false;
   sendBtn.textContent = 'Resend code';
   document.getElementById('submitReport').hidden = false;
   document.getElementById('otp').focus();
 };
+
+/* A code belongs to where it was sent. Changing the email or the number after
+   sending it means asking for a new one, rather than a puzzling mismatch. */
+['contact', 'email'].forEach(id => document.getElementById(id).addEventListener('input', () => {
+  if (document.getElementById('otpBox').hidden) return;
+  document.getElementById('otpBox').hidden = true;
+  document.getElementById('submitReport').hidden = true;
+  document.getElementById('otp').value = '';
+  document.getElementById('sendOtp').textContent = 'Send code';
+}));
 
 const submitBtn = document.getElementById('submitReport');
 submitBtn.onclick = async () => {
@@ -312,6 +331,7 @@ submitBtn.onclick = async () => {
     rec = await Store.submitReport({
       name: document.getElementById('name').value.trim(),
       contact: document.getElementById('contact').value.trim(),
+      email: document.getElementById('email').value.trim(),
       id_number: document.getElementById('idnum').value.trim(),
       gender: genderChoice ? genderChoice.value : null,
       category_id: catSel.value,

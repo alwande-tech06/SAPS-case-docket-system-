@@ -38,7 +38,7 @@ app/scheduler.py            In-app timer for the overdue-report escalation
 app/seed.py                 Reference data and the demonstration data
 app/templates/, app/static/ The pages
 migrations/                 Database schema (Alembic)
-tests/                      119 tests, run with pytest
+tests/                      127 tests, run with pytest
 ```
 
 ## Running it locally
@@ -190,7 +190,9 @@ Later releases: pull the new code, `pip install -r requirements.txt`,
 ### One-time codes (SMS)
 
 Reporting online and opening a QR tracking link both send a six-digit code to
-the complainant's phone. `SMS_PROVIDER` decides how:
+the complainant: to the **email address** if they give one on the report form
+(optional; it uses the password-reset mail settings and is kept for later
+tracking codes), otherwise by SMS to their phone. `SMS_PROVIDER` decides how:
 
 - `demo` — shown on the page. Demonstrations only.
 - `console` — written to the server log. For testing a production build.

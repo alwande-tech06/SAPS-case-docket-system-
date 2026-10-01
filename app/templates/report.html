@@ -134,8 +134,15 @@
     <div class="field">
       <label for="contact">Mobile number <span class="req">*</span></label>
       <input type="tel" id="contact" placeholder="e.g. 082 555 0141 or +27 82 555 0141">
-      <p class="hint">A South African mobile number. We send a six-digit code to this number to
-        confirm it is yours.</p>
+      <p class="hint">A South African mobile number, so the police can contact you.</p>
+    </div>
+    <div class="field">
+      <label for="email">Email address <span class="small muted">(optional)</span></label>
+      <input type="email" id="email" autocomplete="email" autocapitalize="off" spellcheck="false"
+             placeholder="e.g. name@example.com">
+      <p class="hint">We send a six-digit code to confirm the report is yours: to this email if you
+        give one, otherwise by SMS to your mobile number. Later codes for tracking this report go
+        to the same place.</p>
     </div>
     <div class="field">
       <label for="idnum">South African ID number <span class="req">*</span></label>
@@ -149,8 +156,9 @@
     <div id="otpBox" hidden>
       <div class="notice">
         <strong>Verification code sent</strong>
-        <span id="otpSent">A six-digit code has been sent by SMS to the number above. It expires in 10 minutes.</span>
-        <span id="otpDemo" hidden>This demonstration system does not send SMS, so the code is
+        <span id="otpSent">A six-digit code has been sent to <strong id="otpWhere"></strong>. It expires
+        in 10 minutes.</span>
+        <span id="otpDemo" hidden>This demonstration system cannot deliver it, so the code is
         shown here: <span class="ref" id="otpShown"></span></span>
       </div>
       <div class="field">

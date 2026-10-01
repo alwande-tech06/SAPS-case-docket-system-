@@ -87,11 +87,13 @@ async function startLinkVerification(ref, token) {
       <div class="card">
         <div class="card-head"><h2>Enter the code we sent you</h2></div>
         <div class="notice">
-          <strong>Code sent to the number on this report</strong>
+          <strong>Code sent to ${person.sent_to && person.sent_to.channel === 'email'
+            ? 'the email on this report' : 'the number on this report'}</strong>
           ${person.demo_code
-            ? `This demonstration system does not send SMS, so the code is shown here:
+            ? `This demonstration system cannot deliver it, so the code is shown here:
                <span class="ref">${esc(person.demo_code)}</span>`
-            : 'It arrives by SMS and expires in 10 minutes.'}
+            : `It went to ${esc(person.sent_to ? person.sent_to.to : 'you')}${
+                person.sent_to && person.sent_to.channel === 'email' ? '' : ' by SMS'} and expires in 10 minutes.`}
         </div>
         ${error ? `<div class="notice notice-alert"><strong>That code did not match</strong>${esc(error)}</div>` : ''}
         <div class="field">

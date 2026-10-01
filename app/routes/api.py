@@ -187,24 +187,41 @@ def reset_password():
 
 SMS_FAILED = ('We could not send the code to your phone just now. Check the number and try again in a few '
               'minutes, or report at your nearest police station.')
+EMAIL_FAILED = ('We could not send the code to your email just now. Check the address and try again in a few '
+                'minutes, or leave the email empty to receive it by SMS.')
+
+
+def phone_digits(value):
+    return ''.join(ch for ch in str(value or '') if ch.isdigit() or ch == '+')
+
+
+def sent_to(email, phone):
+    """Where the code went, masked: enough for the person to know where to look."""
+    if email:
+        return {'channel': 'email', 'to': otp.mask_email(email)}
+    digits = ''.join(ch for ch in str(phone or '') if ch.isdigit())
+    return {'channel': 'sms', 'to': f'the number ending {digits[-4:]}'}
+
 
 @bp.post('/otp/report')
 @rate_limit('otp', 5, 600)
 def otp_for_report():
-    """Step one of reporting online: prove the phone number."""
+    """Step one of reporting online: prove the contact — by email when the
+    complainant gives an address, otherwise by SMS to their phone."""
     data = body()
     try:
         intake_svc.validate_contact(data.get('name'), data.get('contact'), data.get('id_number'))
+        email = intake_svc.clean_email(data.get('email'))
     except intake_svc.ValidationError as e:
         return error(str(e), 'invalid', 400)
-    contact = ''.join(ch for ch in str(data['contact']) if ch.isdigit() or ch == '+')
+    phone = phone_digits(data['contact'])
     try:
-        code = otp.issue('report', contact)
+        code = otp.issue('report', phone, email=email)
     except otp.SmsError:
         db.session.rollback()
-        return error(SMS_FAILED, 'sms_failed', 503)
+        return error(EMAIL_FAILED if email else SMS_FAILED, 'sms_failed', 503)
     db.session.commit()
-    return jsonify({'ok': True, 'demo_code': code})
+    return jsonify({'ok': True, 'demo_code': code, 'sent_to': sent_to(email, phone)})
 
 
 @bp.post('/intakes')
@@ -217,8 +234,12 @@ def create_intake():
     if user is not None and user.role not in ('official', 'commander'):
         user = None
     if user is None:
-        contact = ''.join(ch for ch in str(data.get('contact', '')) if ch.isdigit() or ch == '+')
-        if not otp.check('report', data.get('otp'), contact=contact):
+        try:
+            email = intake_svc.clean_email(data.get('email'))
+        except intake_svc.ValidationError as e:
+            return error(str(e), 'invalid', 400)
+        # The code must have gone to this same email, or this same phone.
+        if not otp.check('report', data.get('otp'), contact=email or phone_digits(data.get('contact'))):
             db.session.commit()
             return error('That code does not match the one we sent, or it has expired. Ask for a new one.',
                          'otp_invalid', 400)
@@ -288,13 +309,14 @@ def track_link():
                   entity_id=intake.id, case_id=intake.docket_id)
             db.session.commit()
             return error('That is not the ID number recorded on this report.', 'id_mismatch', 403)
+        # To the email on the report when there is one, otherwise by SMS.
         try:
-            code = otp.issue('track', comp.contact, subject=str(intake.id))
+            code = otp.issue('track', comp.contact, subject=str(intake.id), email=comp.email)
         except otp.SmsError:
             db.session.rollback()
-            return error(SMS_FAILED, 'sms_failed', 503)
+            return error(EMAIL_FAILED if comp.email else SMS_FAILED, 'sms_failed', 503)
         db.session.commit()
-        return jsonify({'ok': True, 'name': comp.name, 'demo_code': code})
+        return jsonify({'ok': True, 'name': comp.name, 'demo_code': code, 'sent_to': sent_to(comp.email, comp.contact)})
     audit('view', f'Tracking link for {intake.intake_number}: opened, verification started', entity_type='intake',
           entity_id=intake.id, case_id=intake.docket_id)
     db.session.commit()

@@ -43,7 +43,8 @@ def test_south_african_numbers_go_out_in_international_form(given, expected):
 def test_report_code_is_sent_by_sms_and_never_shown(client, bulksms):
     r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',
                                              'id_number': '9001015009087'})
-    assert r.status_code == 200 and r.json == {'ok': True, 'demo_code': None}
+    assert r.status_code == 200 and r.json['ok'] and r.json['demo_code'] is None
+    assert r.json['sent_to'] == {'channel': 'sms', 'to': 'the number ending 0199'}
     msg = bulksms[0]
     assert msg['url'] == 'https://api.bulksms.com/v1/messages'
     assert msg['auth'] == 'Basic ' + base64.b64encode(b'TOKENID:TOKENSECRET').decode()
@@ -88,7 +89,7 @@ def otp_by_email(app, monkeypatch):
 def test_demo_codes_can_go_by_email_to_one_inbox(client, otp_by_email):
     r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',
                                              'id_number': '9001015009087'})
-    assert r.json == {'ok': True, 'demo_code': None}            # still never on the page
+    assert r.json['ok'] and r.json['demo_code'] is None           # still never on the page
     to, subject, body = otp_by_email[0]
     assert to == 'presenter@example.org' and subject == 'SAPS verification code for 0825550199'
     code = body.split('code is ')[1][:6]
@@ -103,6 +104,62 @@ def test_email_codes_without_an_inbox_fail_clearly(app, client, otp_by_email):
     r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',
                                              'id_number': '9001015009087'})
     assert r.status_code == 503 and not otp_by_email
+
+
+@pytest.fixture
+def mailbox(app, monkeypatch):
+    mailed = []
+    import app.services.mail as mail
+    monkeypatch.setattr(mail, 'send_email', lambda to, subject, body: mailed.append((to, subject, body)))
+    app.config['EMAIL_PROVIDER'] = 'smtp'
+    return mailed
+
+
+PERSON = {'name': 'Zanele Mokoena', 'contact': '082 555 0199', 'id_number': '9001015009087'}
+REPORT = dict(PERSON, category_id=1, location='Berea', description='Phone taken.',
+              incident_datetime='2026-09-28T08:00:00Z')
+
+
+def test_a_complainant_can_get_the_code_by_their_own_email(client, mailbox, bulksms):
+    r = client.post('/api/otp/report', json=dict(PERSON, email=' Zanele.M@Example.org '))
+    assert r.json == {'ok': True, 'demo_code': None, 'sent_to': {'channel': 'email', 'to': 'z*******@example.org'}}
+    assert not bulksms                                         # no SMS when an email is given
+    to, subject, body = mailbox[0]
+    assert to == 'zanele.m@example.org' and 'expires in 10 minutes' in body
+    code = body.split('code is ')[1][:6]
+    # The code works only with that same email.
+    assert client.post('/api/intakes', json=dict(REPORT, otp=code, email='other@example.org')).status_code == 400
+    filed = client.post('/api/intakes', json=dict(REPORT, otp=code, email='zanele.m@example.org'))
+    assert filed.status_code == 201 and filed.json['complainant']['email'] == 'zanele.m@example.org'
+
+
+def test_tracking_link_code_goes_to_the_email_on_file(client, mailbox, bulksms):
+    sent = client.post('/api/otp/report', json=dict(PERSON, email='zanele@example.org')).json
+    code = mailbox[-1][2].split('code is ')[1][:6]
+    intake = client.post('/api/intakes', json=dict(REPORT, otp=code, email='zanele@example.org')).json['intake']
+    r = client.post('/api/track/link', json={'reference': intake['intake_number'], 'token': intake['track_token'],
+                                             'id_number': PERSON['id_number']})
+    assert r.json['sent_to'] == {'channel': 'email', 'to': 'z*****@example.org'} and not bulksms
+    assert mailbox[-1][0] == 'zanele@example.org'
+    assert sent['ok']
+
+
+def test_without_an_email_the_code_still_goes_by_sms(client, mailbox, bulksms):
+    r = client.post('/api/otp/report', json=PERSON)
+    assert r.json['sent_to'] == {'channel': 'sms', 'to': 'the number ending 0199'}
+    assert len(bulksms) == 1 and not mailbox
+
+
+@pytest.mark.parametrize('bad', ['zanele', 'zanele@', 'zanele@example', 'a b@example.org'])
+def test_an_incomplete_email_is_refused(client, mailbox, bad):
+    r = client.post('/api/otp/report', json=dict(PERSON, email=bad))
+    assert r.status_code == 400 and 'email address is not complete' in r.json['error'] and not mailbox
+
+
+def test_email_codes_are_shown_only_when_no_mail_is_set_up(app, client):
+    app.config['EMAIL_PROVIDER'] = 'demo'
+    r = client.post('/api/otp/report', json=dict(PERSON, email='zanele@example.org'))
+    assert r.json['demo_code'] and r.json['sent_to']['channel'] == 'email'
 
 
 def test_missing_token_is_a_failed_send(app, client, bulksms):

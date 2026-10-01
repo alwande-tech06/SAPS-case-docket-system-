@@ -117,22 +117,51 @@ def _by_email(number, message):
         raise SmsError(f'The code could not be emailed: {e}') from e
 
 
-def issue(purpose, contact, subject=None):
-    """Sends a fresh code for `purpose` ('report' or 'track') to `contact`.
-    Returns the code itself only in demo mode, for the page to show. Raises
-    SmsError when the message could not be sent."""
+def mask_email(address):
+    """a*****@gmail.com — enough for someone to recognise their own address."""
+    local, _, domain = str(address or '').partition('@')
+    return f'{local[:1]}{"*" * max(len(local) - 1, 3)}@{domain}' if domain else ''
+
+
+def _send_code_by_email(address, code):
+    from .mail import send_email
+    if current_app.config.get('EMAIL_PROVIDER', 'demo') == 'demo':
+        return   # nothing configured to send email; the page shows the code instead
+    try:
+        send_email(address, 'Your SAPS verification code',
+                   f'Your SAPS verification code is {code}. It expires in 10 minutes.\n\n'
+                   'If you did not ask for this code, ignore this email.')
+    except Exception as e:
+        raise SmsError(f'The code could not be emailed: {e}') from e
+
+
+def code_shown_on_screen(email=None):
+    """Whether the code is handed to the page, because nothing can deliver it."""
+    if email:
+        return current_app.config.get('EMAIL_PROVIDER', 'demo') == 'demo'
+    return current_app.config.get('SMS_PROVIDER', 'demo') == 'demo'
+
+
+def issue(purpose, contact, subject=None, email=None):
+    """Sends a fresh code for `purpose` ('report' or 'track'): to `email` when
+    one is given, otherwise by SMS to `contact`. The code is bound to whichever
+    it went to. Returns the code itself only when nothing can deliver it (demo),
+    for the page to show. Raises SmsError when it could not be sent."""
     code = f'{secrets.randbelow(900000) + 100000}'
-    rec = OtpChallenge(purpose=purpose, contact=contact, subject=subject, digest=_digest(code),
+    rec = OtpChallenge(purpose=purpose, contact=email or contact, subject=subject, digest=_digest(code),
                        expires_at=utcnow() + TTL, attempts=0, used=False)
     db.session.add(rec)
     db.session.flush()
     try:
-        send_sms(contact, f'Your SAPS verification code is {code}. It expires in 10 minutes.')
+        if email:
+            _send_code_by_email(email, code)
+        else:
+            send_sms(contact, f'Your SAPS verification code is {code}. It expires in 10 minutes.')
     except SmsError:
-        current_app.logger.exception('One-time code to %s could not be sent', contact)
+        current_app.logger.exception('One-time code to %s could not be sent', email or contact)
         raise
     session[f'otp_{purpose}'] = rec.id
-    return code if current_app.config.get('SMS_PROVIDER', 'demo') == 'demo' else None
+    return code if code_shown_on_screen(email) else None
 
 
 def check(purpose, code, contact=None, subject=None):
