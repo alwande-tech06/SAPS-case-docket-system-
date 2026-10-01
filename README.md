@@ -38,7 +38,7 @@ app/scheduler.py            In-app timer for the overdue-report escalation
 app/seed.py                 Reference data and the demonstration data
 app/templates/, app/static/ The pages
 migrations/                 Database schema (Alembic)
-tests/                      127 tests, run with pytest
+tests/                      132 tests, run with pytest
 ```
 
 ## Running it locally
@@ -210,6 +210,15 @@ tracking codes), otherwise by SMS to their phone. `SMS_PROVIDER` decides how:
 
 Codes are kept hashed in the database, expire after 10 minutes, and allow five
 attempts.
+
+**Email-only codes (`OTP_CHANNEL=email`).** To avoid SMS costs, codes can go
+only to each complainant's own email: the report form then requires an email
+address, no SMS is ever sent, and QR tracking codes go to the email on the
+report (a report with no email is tracked by reference number and name).
+Leave `OTP_CHANNEL` unset (`any`) to fall back to SMS when no email is given.
+A personal Gmail account allows about 500 emails a day and may be throttled for
+automated mail; for real volumes use a transactional email service with an SMTP
+option (Brevo, SendGrid, Amazon SES) — only the `SMTP_*` settings change.
 
 ### Password resets
 

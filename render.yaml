@@ -29,13 +29,11 @@ services:
         sync: false
       - key: BULKSMS_PASSWORD
         sync: false
-      # Leave empty when the BulkSMS token (with credits) is set. For a
-      # demonstration: "email" sends codes to OTP_EMAIL_TO, "demo" shows them
-      # on screen.
-      - key: SMS_PROVIDER
-        sync: false
-      - key: OTP_EMAIL_TO
-        sync: false
+      # One-time codes to each complainant's own email (no SMS cost); the
+      # report form then requires an email. Uses the SMTP settings below.
+      # Remove (or set "any") to send by SMS when no email is given.
+      - key: OTP_CHANNEL
+        value: email
       # First deploy only (ignored once accounts exist): either load the demo
       # data with SEED_DEMO_DATA=true, or create the first administrator.
       - key: SEED_DEMO_DATA

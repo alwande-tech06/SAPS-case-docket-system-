@@ -214,6 +214,8 @@ def otp_for_report():
         email = intake_svc.clean_email(data.get('email'))
     except intake_svc.ValidationError as e:
         return error(str(e), 'invalid', 400)
+    if not email and current_app.config['OTP_CHANNEL'] == 'email':
+        return error('Enter your email address. We send the code there.', 'email_required', 400)
     phone = phone_digits(data['contact'])
     try:
         code = otp.issue('report', phone, email=email)
@@ -309,7 +311,12 @@ def track_link():
                   entity_id=intake.id, case_id=intake.docket_id)
             db.session.commit()
             return error('That is not the ID number recorded on this report.', 'id_mismatch', 403)
-        # To the email on the report when there is one, otherwise by SMS.
+        # To the email on the report when there is one, otherwise by SMS —
+        # unless codes go only by email and this report has none.
+        if not comp.email and current_app.config['OTP_CHANNEL'] == 'email':
+            db.session.commit()
+            return error('This report has no email address to send a code to. Look it up with the reference '
+                         'number and your full name instead, or visit the station.', 'no_email', 409)
         try:
             code = otp.issue('track', comp.contact, subject=str(intake.id), email=comp.email)
         except otp.SmsError:

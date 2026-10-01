@@ -162,6 +162,52 @@ def test_email_codes_are_shown_only_when_no_mail_is_set_up(app, client):
     assert r.json['demo_code'] and r.json['sent_to']['channel'] == 'email'
 
 
+# ----- OTP_CHANNEL=email: codes only ever by the complainant's own email -----
+
+@pytest.fixture
+def email_only(app, mailbox, bulksms):
+    app.config['OTP_CHANNEL'] = 'email'
+    return mailbox
+
+
+def test_email_only_requires_an_email_and_never_sends_sms(client, email_only, bulksms):
+    r = client.post('/api/otp/report', json=PERSON)
+    assert r.status_code == 400 and r.json['code'] == 'email_required' and not bulksms and not email_only
+    r = client.post('/api/otp/report', json=dict(PERSON, email='zanele@example.org'))
+    assert r.json['sent_to']['channel'] == 'email' and email_only[0][0] == 'zanele@example.org' and not bulksms
+
+
+def test_email_only_form_marks_email_required(app, client):
+    app.config['OTP_CHANNEL'] = 'email'
+    page = client.get('/report').get_data(as_text=True)
+    assert 'data-required="1"' in page and 'We email you a six-digit code' in page
+    app.config['OTP_CHANNEL'] = 'any'
+    assert 'data-required="1"' not in client.get('/report').get_data(as_text=True).split('id="email"')[1][:200]
+
+
+def test_email_only_qr_link_on_a_report_without_email(client, email_only, bulksms):
+    intake = Intake.query.filter_by(intake_number='INT-2026-DBN-000001').one()     # seeded, no email
+    r = client.post('/api/track/link', json={'reference': intake.intake_number, 'token': intake.track_token,
+                                             'id_number': '8804120832087'})
+    assert r.status_code == 409 and r.json['code'] == 'no_email' and not bulksms
+    # Reference and name still work, with no code needed.
+    assert client.post('/api/track', json={'reference': intake.intake_number, 'name': 'Thandeka Ngcobo'}).json['ok']
+
+
+def test_assisted_capture_keeps_the_email_for_later_codes(client, as_role):
+    as_role('official')
+    r = client.post('/api/intakes', json=dict(REPORT, email='Walkin@Example.org'))
+    assert r.status_code == 201 and r.json['complainant']['email'] == 'walkin@example.org'
+
+
+def test_unknown_channel_setting_is_refused(monkeypatch):
+    import config
+    from app import create_app
+    monkeypatch.setattr(config.TestingConfig, 'OTP_CHANNEL', 'pigeon')
+    with pytest.raises(RuntimeError, match='OTP_CHANNEL'):
+        create_app('testing')
+
+
 def test_missing_token_is_a_failed_send(app, client, bulksms):
     app.config['BULKSMS_PASSWORD'] = None
     r = client.post('/api/otp/report', json={'name': 'Zanele Mokoena', 'contact': '082 555 0199',

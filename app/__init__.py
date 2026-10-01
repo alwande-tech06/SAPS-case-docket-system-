@@ -28,6 +28,11 @@ def create_app(config_name=None):
                                                         and app.config['SMTP_USERNAME']):
         app.logger.warning('EMAIL_PROVIDER=smtp but SMTP_HOST, SMTP_USERNAME or SMTP_FROM is missing: '
                            'password-reset emails will not be sent.')
+    if app.config['OTP_CHANNEL'] not in ('any', 'email'):
+        raise RuntimeError('OTP_CHANNEL must be "any" or "email".')
+    if app.config['OTP_CHANNEL'] == 'email' and app.config['EMAIL_PROVIDER'] != 'smtp':
+        app.logger.warning('OTP_CHANNEL=email but EMAIL_PROVIDER is "%s": one-time codes will not reach anyone\'s '
+                           'inbox. Set the mail server settings.', app.config['EMAIL_PROVIDER'])
     if app.config['SMS_PROVIDER'] == 'email' and not app.config.get('OTP_EMAIL_TO'):
         app.logger.warning('SMS_PROVIDER=email but OTP_EMAIL_TO is not set: one-time codes cannot be sent.')
     if app.config['SMS_PROVIDER'] == 'bulksms' and not (app.config['BULKSMS_USERNAME'] and app.config['BULKSMS_PASSWORD']):

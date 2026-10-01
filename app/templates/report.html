@@ -136,13 +136,19 @@
       <input type="tel" id="contact" placeholder="e.g. 082 555 0141 or +27 82 555 0141">
       <p class="hint">A South African mobile number, so the police can contact you.</p>
     </div>
+    {% set email_required = config.OTP_CHANNEL == 'email' %}
     <div class="field">
-      <label for="email">Email address <span class="small muted">(optional)</span></label>
+      <label for="email">Email address {% if email_required %}<span class="req">*</span>{% else %}<span class="small muted">(optional)</span>{% endif %}</label>
       <input type="email" id="email" autocomplete="email" autocapitalize="off" spellcheck="false"
-             placeholder="e.g. name@example.com">
+             placeholder="e.g. name@example.com"{% if email_required %} required data-required="1"{% endif %}>
+      {% if email_required %}
+      <p class="hint">We email you a six-digit code to confirm the report is yours. Later codes
+        for tracking this report go to the same address.</p>
+      {% else %}
       <p class="hint">We send a six-digit code to confirm the report is yours: to this email if you
         give one, otherwise by SMS to your mobile number. Later codes for tracking this report go
         to the same place.</p>
+      {% endif %}
     </div>
     <div class="field">
       <label for="idnum">South African ID number <span class="req">*</span></label>

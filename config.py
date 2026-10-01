@@ -55,6 +55,11 @@ class Config:
     BULKSMS_SENDER = env('BULKSMS_SENDER')      # optional; only a sender ID registered with BulkSMS
     # SMS_PROVIDER=email (demonstrations): the inbox that stands in for every phone.
     OTP_EMAIL_TO = env('OTP_EMAIL_TO')
+    # Where one-time codes go:
+    #   any    — to the complainant's email if they give one, otherwise by SMS
+    #   email  — always to the complainant's own email, which the form then
+    #            requires; no SMS is ever sent (no SMS cost)
+    OTP_CHANNEL = env('OTP_CHANNEL', default='any').lower()
     RATELIMIT_ENABLED = flag('RATELIMIT_ENABLED', True)
 
     # Password-reset emails: demo (link shown on screen), console (server log) or
@@ -92,6 +97,7 @@ class TestingConfig(Config):
     # Never the developer's real mail settings from .env.
     PUBLIC_BASE_URL = SMTP_HOST = SMTP_USERNAME = SMTP_PASSWORD = SMTP_FROM = None
     BULKSMS_USERNAME = BULKSMS_PASSWORD = BULKSMS_SENDER = OTP_EMAIL_TO = None
+    OTP_CHANNEL = 'any'
 
 
 class ProductionConfig(Config):

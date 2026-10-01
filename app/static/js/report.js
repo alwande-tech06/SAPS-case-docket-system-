@@ -263,6 +263,9 @@ document.getElementById('sendOtp').onclick = async () => {
   if (!hasNameAndSurname(name)) { toast('Enter both your first name and surname.', 'alert'); return; }
   if (!document.querySelector('input[name="gender"]:checked')) { toast('Select your gender.', 'alert'); return; }
   if (!isValidSaMobile(contact)) { toast('Enter a valid South African mobile number, e.g. 082 555 0141.', 'alert'); return; }
+  if (!email && document.getElementById('email').dataset.required) {
+    toast('Enter your email address. We send the code there.', 'alert'); return;
+  }
   if (email && !/^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(email)) {
     toast('That email address is not complete. Check it, or leave it empty.', 'alert'); return;
   }
