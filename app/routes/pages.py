@@ -47,12 +47,18 @@ def snapshot_for_templates():
 
 
 # Public pages
-_page('/', 'report', 'report.html')
+_page('/', 'index', 'index.html')              # the landing page: report, track, or staff sign-in
+_page('/report', 'report', 'report.html')
 _page('/track', 'track', 'track.html')
 _page('/guide', 'guide', 'guide.html')
 _page('/what-happens-next', 'what_happens_next', 'what-happens-next.html')
-_page('/index', 'index', 'index.html')
 _page('/login', 'login', 'login.html')
+
+
+@bp.get('/index')
+def index_alias():
+    # The landing page used to live here.
+    return redirect(url_for('pages.index'), code=301)
 
 # Staff pages
 _page('/dashboard-official', 'dashboard_official', 'dashboard-official.html', ('official',))

@@ -6,6 +6,11 @@
    docket this system replaces.
    ========================================================================== */
 
+/* `hidden` must always win. Without this, any class that sets display (.btn,
+   .card, .notice…) shows an element the page has hidden — which put the
+   "Reset demonstration data" button on screen with demo mode off. */
+[hidden] { display: none !important; }
+
 :root {
   --ink:         #14181F;
   --muted:       #666D7A;
@@ -294,7 +299,7 @@ label {
   margin-bottom: .32rem;
 }
 label .req { color: var(--alert); }
-input[type="text"], input[type="password"], input[type="tel"],
+input[type="text"], input[type="password"], input[type="tel"], input[type="email"],
 input[type="date"], input[type="time"], input[type="number"],
 select, textarea {
   width: 100%;

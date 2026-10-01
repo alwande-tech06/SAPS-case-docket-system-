@@ -122,10 +122,15 @@ def request_password_reset(email, base_url):
     token = secrets.token_urlsafe(32)
     db.session.add(PasswordReset(user_id=u.id, token_hash=_hash(token), expires_at=now() + RESET_TTL))
     link = f'{base_url.rstrip("/")}/reset-password?token={token}'
-    send_email(u.email, 'Reset your SAPS docket system password',
-               f'Hello {u.name},\n\nSomeone asked to reset the password for this account. To choose a new '
-               f'password, open this link within 30 minutes:\n\n{link}\n\nIf it was not you, ignore this email; '
-               'your password has not changed.\n')
+    try:
+        send_email(u.email, 'Reset your SAPS docket system password',
+                   f'Hello {u.name},\n\nSomeone asked to reset the password for this account. To choose a new '
+                   f'password, open this link within 30 minutes:\n\n{link}\n\nIf it was not you, ignore this email; '
+                   'your password has not changed.\n')
+    except Exception:
+        # The page still gives its usual answer — an error here would tell a
+        # stranger that the address has an account. The log tells the administrator.
+        current_app.logger.exception('Password reset email to %s could not be sent', u.email)
     audit('password_reset_requested', f'Password reset link sent to {u.name}', entity_type='user', entity_id=u.id)
     return link if current_app.config.get('EMAIL_PROVIDER', 'demo') == 'demo' else None
 

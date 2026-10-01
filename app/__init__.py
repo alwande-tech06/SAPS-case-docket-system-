@@ -11,7 +11,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from config import config_by_name
+import config
 
 from . import security
 from .extensions import db, migrate
@@ -20,9 +20,13 @@ from .extensions import db, migrate
 def create_app(config_name=None):
     config_name = config_name or os.getenv('FLASK_CONFIG', 'development')
     app = Flask(__name__)
-    app.config.from_object(config_by_name[config_name])
+    app.config.from_object(config.config_by_name[config_name])
     if not app.config.get('SQLALCHEMY_DATABASE_URI'):
         raise RuntimeError('DATABASE_URL is not set. Copy .env.example to .env and fill it in.')
+    if app.config['EMAIL_PROVIDER'] == 'smtp' and not (app.config['SMTP_HOST'] and app.config['SMTP_FROM']
+                                                        and app.config['SMTP_USERNAME']):
+        app.logger.warning('EMAIL_PROVIDER=smtp but SMTP_HOST, SMTP_USERNAME or SMTP_FROM is missing: '
+                           'password-reset emails will not be sent.')
     if config_name == 'production':
         if app.config['SECRET_KEY'] in ('', 'dev-only-change-me', 'CHANGE_ME') or len(app.config['SECRET_KEY']) < 32:
             raise RuntimeError('Set SECRET_KEY to a long random value before running in production.')
@@ -83,6 +87,45 @@ def _register_cli(app):
         load_reference()
         db.session.commit()
         click.echo('Reference data loaded.')
+
+    @app.cli.command('bootstrap')
+    def bootstrap():
+        """First-deploy setup, safe to run on every deploy (the hosting build runs it).
+
+        Always loads the reference data. Only while the database has no accounts:
+        SEED_DEMO_DATA=true loads the demonstration data; otherwise ADMIN_EMAIL and
+        ADMIN_PASSWORD (and ADMIN_NAME) create the first administrator. Never wipes
+        or changes an existing system."""
+        from .models import User
+        from .seed import load_reference, reset_and_seed
+        from .services.admin import password_problem
+        from .services.common import audit
+        load_reference()
+        db.session.commit()
+        if User.query.count():
+            click.echo('Reference data checked. Accounts already exist; nothing else to do.')
+            return
+        if os.getenv('SEED_DEMO_DATA', '').strip().lower() in ('1', 'true', 'yes', 'on'):
+            reset_and_seed()
+            click.echo('Empty database: demonstration data loaded (all demo accounts use demo1234).')
+            return
+        email, password = os.getenv('ADMIN_EMAIL', '').strip().lower(), os.getenv('ADMIN_PASSWORD', '')
+        if not email or not password:
+            click.echo('Empty database and no ADMIN_EMAIL / ADMIN_PASSWORD set: no one can sign in yet. '
+                       'Set them (or SEED_DEMO_DATA=true) and deploy again.')
+            return
+        problem = password_problem(password)
+        if problem:
+            raise click.ClickException(f'ADMIN_PASSWORD is too weak: {problem}')
+        user = User(name=os.getenv('ADMIN_NAME', 'System Administrator').strip(), email=email, role='admin',
+                    station_id=1, is_active=True, must_change_password=False)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.flush()
+        audit('create', f'Account created: {user.name} (Administrator) at first deployment',
+              entity_type='user', entity_id=user.id)
+        db.session.commit()
+        click.echo(f'Administrator {email} created.')
 
     @app.cli.command('create-admin')
     @click.option('--name', prompt=True)

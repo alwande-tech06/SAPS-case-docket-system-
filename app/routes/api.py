@@ -13,6 +13,7 @@ one, which the Store in the browser swaps in.
   /api/files/<id>       uploaded photographs and documents
   /api/snapshot         the current snapshot, for a page that wants to refresh
 """
+import secrets
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -81,18 +82,40 @@ def get_snapshot():
 
 # ----- auth -----
 
+BAD_CREDENTIALS = 'That email address and password do not match an account.'
+_dummy_hash = None
+
+
+def _spend_a_password_check(password):
+    """Checks against a throwaway hash, so an unknown email takes as long to
+    refuse as a wrong password does."""
+    global _dummy_hash
+    if _dummy_hash is None:
+        _dummy_hash = User()
+        _dummy_hash.set_password(secrets.token_urlsafe(16))
+    _dummy_hash.check_password(password)
+
 @bp.post('/auth/login')
 @rate_limit('login', 10, 300)
 def login():
     data = body()
     email = str(data.get('email', '')).strip().lower()
+    password = str(data.get('password', ''))
+    if not email or not password:
+        return error('Enter your email address and password.', 'missing_credentials', 400)
     user = User.query.filter(db.func.lower(User.email) == email).first()
+    # One answer, and the same amount of work, whether the email has an account
+    # or the password is wrong — so the form cannot be used to find staff emails.
     if user is None:
-        return error('No account found for that email address.', 'unknown_email', 401)
-    if not user.check_password(str(data.get('password', ''))):
-        return error('That password does not match our records.', 'wrong_password', 401)
+        _spend_a_password_check(password)
+        return error(BAD_CREDENTIALS, 'invalid_credentials', 401)
+    if not user.check_password(password):
+        audit('login_failed', f'Failed sign-in for {user.name}', entity_type='user', entity_id=user.id)
+        db.session.commit()
+        return error(BAD_CREDENTIALS, 'invalid_credentials', 401)
+    # Only someone who knows the password learns the account is switched off.
     if not user.is_active:
-        return error('This account has been deactivated.', 'inactive', 403)
+        return error('This account has been deactivated. Speak to your system administrator.', 'inactive', 403)
     user.last_login = datetime.now(timezone.utc)
     audit('login', f'{user.name} signed in', user, entity_type='user', entity_id=user.id)
     db.session.commit()

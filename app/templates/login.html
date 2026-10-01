@@ -19,34 +19,50 @@
   <p class="small muted">Every action you take in this system is recorded against your name
   and the role you hold at the time.</p>
 
-  <div class="card" id="signInCard" style="margin-top:1.2rem">
+  <!-- Shown instead of jumping to a dashboard when this browser is still signed in,
+       so the next person at a shared computer can sign in as themselves. -->
+  <div class="card" id="signedInCard" style="margin-top:1.2rem" hidden>
+    <div class="notice"><strong>You are already signed in</strong>
+      <span id="signedInAs"></span></div>
+    <div class="btn-row">
+      <a class="btn btn-primary" id="continueDashboard" href="#">Continue to my dashboard</a>
+      <button class="btn" id="signOutHere">Sign out, to sign in as someone else</button>
+    </div>
+  </div>
+
+  <!-- A real form, so the browser's password manager and the Enter key work.
+       It is sent by script to /api/auth/login; action= is only a fallback. -->
+  <form class="card" id="signInCard" style="margin-top:1.2rem" method="post" action="#" novalidate>
+    <div id="signInNotice" role="status"></div>
     <div class="field">
       <label for="email">Email address</label>
-      <input type="text" id="email" autocomplete="username">
+      <input type="email" id="email" name="email" autocomplete="username" autocapitalize="off"
+             spellcheck="false" required>
     </div>
     <div class="field">
       <label for="password">Password</label>
-      <input type="password" id="password" autocomplete="current-password">
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
     </div>
-    <button class="btn btn-primary" id="signIn" style="width:100%">Sign in</button>
+    <button type="submit" class="btn btn-primary" id="signIn" style="width:100%">Sign in</button>
     <p class="small" style="margin:.8rem 0 0;text-align:center">
       <a href="#forgot" id="forgotLink">Forgot your password?</a></p>
-    <div id="loginError"></div>
-  </div>
+    <div id="loginError" role="alert"></div>
+  </form>
 
   <!-- "Forgot your password?": a link to the email on the account. -->
-  <div class="card" id="forgotCard" style="margin-top:1.2rem" hidden>
+  <form class="card" id="forgotCard" style="margin-top:1.2rem" method="post" action="#" novalidate hidden>
     <div class="card-head"><h2>Reset your password</h2></div>
-    <p class="small muted">Enter the email address of your account. If it has one, we send a
-    link to it that lets you choose a new password within 30 minutes.</p>
+    <p class="small muted">Enter the email address of your account. We will email it a link
+    to choose a new password.</p>
     <div class="field">
       <label for="forgotEmail">Email address</label>
-      <input type="text" id="forgotEmail" autocomplete="username">
+      <input type="email" id="forgotEmail" name="email" autocomplete="username" autocapitalize="off"
+             spellcheck="false" required>
     </div>
-    <button class="btn btn-primary" id="sendReset" style="width:100%">Send the link</button>
-    <div id="forgotResult"></div>
+    <button type="submit" class="btn btn-primary" id="sendReset" style="width:100%">Send the link</button>
+    <div id="forgotResult" role="alert"></div>
     <p class="small" style="margin:.8rem 0 0;text-align:center"><a href="#" id="backToSignIn">Back to sign in</a></p>
-  </div>
+  </form>
 
   <!-- A new account signs in with a one-time password and must replace it. -->
   <div class="card" id="changeCard" style="margin-top:1.2rem" hidden>
@@ -69,15 +85,9 @@
     <div id="changeError"></div>
   </div>
 
-  <div class="demo-users" id="demoUsers" hidden>
-    <p class="eyebrow">Demonstration accounts — tap to fill</p>
-    <div id="demoList"></div>
-    <p class="small muted" style="margin-top:.6rem">Password for all accounts: <span class="ref">demo1234</span></p>
-  </div>
-
   <div class="btn-row" style="margin-top:1.2rem">
     <a class="btn btn-sm" href="{{ url_for('pages.index') }}">Public reporting</a>
-    <button class="btn btn-sm" id="resetData" hidden>Reset demonstration data</button>
+    {% if config.DEMO_MODE %}<button class="btn btn-sm" id="resetData">Reset demonstration data</button>{% endif %}
   </div>
 </main>
 
@@ -85,44 +95,52 @@
 <script src="{{ url_for('static', filename='js/store.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script>
-if (Store.session() && !Store.mustChangePassword()) location.replace(ROLE_HOME[Store.session().role]);
-if (Store.session() && Store.mustChangePassword()) showChangePassword();
-
-/* Demonstration accounts and the reset exist only when the server runs in
-   demonstration mode. */
-document.getElementById('demoUsers').hidden = !Store.demoMode();
-document.getElementById('resetData').hidden = !Store.demoMode();
-
-const demo = [
-  { email: 'official@saps.demo',  label: 'Sgt. M. Dlamini',  role: 'Police Official' },
-  { email: 'detective@saps.demo', label: 'Det. S. Pillay',   role: 'Detective' },
-  { email: 'commander@saps.demo', label: 'Col. N. Zulu',     role: 'Station Commander' },
-  { email: 'admin@saps.demo',     label: 'A. Sithole',       role: 'Administrator' }
-];
-
-document.getElementById('demoList').innerHTML = demo.map(d =>
-  `<button data-email="${d.email}"><span class="r">${d.role}</span><br>${d.label}</button>`).join('');
-
-document.querySelectorAll('#demoList button').forEach(b => {
-  b.onclick = () => {
-    document.getElementById('email').value = b.dataset.email;
-    document.getElementById('password').value = 'demo1234';
-    signIn();
+/* Already signed in: say who as, and offer the dashboard or signing out —
+   never jump straight into someone's dashboard from the sign-in page. */
+const already = Store.session();
+if (already && Store.mustChangePassword()) {
+  showChangePassword();
+} else if (already) {
+  document.getElementById('signInCard').hidden = true;
+  document.getElementById('signedInCard').hidden = false;
+  document.getElementById('signedInAs').textContent = `as ${already.name} (${labelRole(already.role)}).`;
+  document.getElementById('continueDashboard').href = ROLE_HOME[already.role];
+  document.getElementById('signOutHere').onclick = async () => {
+    await Store.logout();
+    location.replace('/login');
   };
-});
+}
+
+if (!already) document.getElementById('email').focus();
 
 let signedInAs = null;
 
-async function signIn() {
+/* The server checks the password (hashed, rate-limited, audited) and starts
+   the session; nothing about the account is decided in this page. */
+async function signIn(e) {
+  if (e) e.preventDefault();
   const btn = document.getElementById('signIn');
+  const emailBox = document.getElementById('email');
+  const passwordBox = document.getElementById('password');
+  const box = document.getElementById('loginError');
+  const fail = (msg, focus) => {
+    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Cannot sign in</strong>${esc(msg)}</div>`;
+    if (focus) focus.focus();
+  };
+  const email = emailBox.value.trim();
+  if (!email) { fail('Enter your email address.', emailBox); return; }
+  if (!passwordBox.value) { fail('Enter your password.', passwordBox); return; }
   if (btn.disabled) return;
+
   btn.disabled = true;
-  const res = await Store.login(document.getElementById('email').value,
-                                document.getElementById('password').value);
+  btn.textContent = 'Signing in…';
+  box.innerHTML = '';
+  const res = await Store.login(email, passwordBox.value);
   btn.disabled = false;
+  btn.textContent = 'Sign in';
   if (!res.ok) {
-    document.getElementById('loginError').innerHTML =
-      `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Cannot sign in</strong>${esc(res.error)}</div>`;
+    passwordBox.value = '';
+    fail(res.error, passwordBox);
     return;
   }
   signedInAs = res.user;
@@ -154,8 +172,7 @@ async function savePassword() {
   location.href = ROLE_HOME[(signedInAs || Store.session()).role];
 }
 
-document.getElementById('signIn').onclick = signIn;
-document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+document.getElementById('signInCard').addEventListener('submit', signIn);
 document.getElementById('savePassword').onclick = savePassword;
 document.getElementById('newPassword2').addEventListener('keydown', e => { if (e.key === 'Enter') savePassword(); });
 
@@ -172,29 +189,48 @@ document.getElementById('forgotLink').onclick = e => { e.preventDefault(); showF
 document.getElementById('backToSignIn').onclick = e => { e.preventDefault(); showForgot(false); };
 if (location.hash === '#forgot' && !Store.session()) showForgot(true);
 
-async function sendReset() {
+async function sendReset(e) {
+  if (e) e.preventDefault();
   const btn = document.getElementById('sendReset');
-  const email = document.getElementById('forgotEmail').value.trim();
+  const emailBox = document.getElementById('forgotEmail');
+  const email = emailBox.value.trim();
   const box = document.getElementById('forgotResult');
-  if (!email) { box.innerHTML = '<div class="notice notice-alert" style="margin-top:.9rem"><strong>Enter your email address</strong></div>'; return; }
+  const fail = msg => {
+    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Not sent</strong>${esc(msg)}</div>`;
+    emailBox.focus();
+  };
+  if (!email) { fail('Enter the email address of your account.'); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { fail('That is not a complete email address.'); return; }
   if (btn.disabled) return;
   btn.disabled = true;
+  btn.textContent = 'Sending…';
   const res = await Store.requestPasswordReset(email);
   btn.disabled = false;
-  if (!res.ok) {
-    box.innerHTML = `<div class="notice notice-alert" style="margin-top:.9rem"><strong>Not sent</strong>${esc(res.error)}</div>`;
-    return;
-  }
-  /* The same message whether or not the address has an account. */
-  box.innerHTML = `<div class="notice" style="margin-top:.9rem"><strong>Check your email</strong>
-    If ${esc(email)} belongs to an account, a link to reset its password is on its way. It works for 30 minutes.
-    ${res.demo_link ? `<div style="margin-top:.6rem">This demonstration system sends no email. The link is:
-      <a href="${esc(res.demo_link)}" id="demoResetLink">reset the password</a></div>` : ''}</div>`;
-}
-document.getElementById('sendReset').onclick = sendReset;
-document.getElementById('forgotEmail').addEventListener('keydown', e => { if (e.key === 'Enter') sendReset(); });
+  btn.textContent = 'Send the link';
+  if (!res.ok) { fail(res.error); return; }
 
-document.getElementById('resetData').onclick = async () => {
+  /* Back to sign in, with the address filled in and a note of what happened.
+     It cannot say "email sent" outright: the server gives the same answer for
+     an address with no account, so that this form cannot be used to find out
+     which staff emails exist. */
+  box.innerHTML = '';
+  showForgot(false);
+  document.getElementById('email').value = email;
+  document.getElementById('password').value = '';
+  document.getElementById('loginError').innerHTML = '';
+  document.getElementById('signInNotice').innerHTML = `
+    <div class="notice" style="margin-bottom:1rem"><strong>Reset link requested</strong>
+      If ${esc(email)} is the address of an account, a link to choose a new password has been
+      emailed to it. It works for 30 minutes. Not there? Check your spam folder, or ask for it again.
+      ${res.demo_link ? `<div style="margin-top:.6rem">This system is not sending email, so the link is
+        here: <a href="${esc(res.demo_link)}" id="demoResetLink">choose a new password</a></div>` : ''}
+    </div>`;
+}
+document.getElementById('forgotCard').addEventListener('submit', sendReset);
+
+/* Only on the page when the server runs with DEMO_MODE on. */
+const resetData = document.getElementById('resetData');
+if (resetData) resetData.onclick = async () => {
   await Store.reset();
   location.reload();
 };

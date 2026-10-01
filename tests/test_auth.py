@@ -28,17 +28,38 @@ def test_email_is_case_insensitive(client):
     assert client.post('/api/auth/login', json={'email': '  Official@SAPS.demo ', 'password': 'demo1234'}).status_code == 200
 
 
-def test_wrong_password_and_unknown_email(client):
-    r = client.post('/api/auth/login', json={'email': 'official@saps.demo', 'password': 'nope'})
-    assert r.status_code == 401 and r.json['code'] == 'wrong_password'
-    r = client.post('/api/auth/login', json={'email': 'nobody@saps.demo', 'password': 'x'})
-    assert r.json['code'] == 'unknown_email'
+def test_unknown_email_and_wrong_password_get_the_same_answer(client):
+    wrong = client.post('/api/auth/login', json={'email': 'official@saps.demo', 'password': 'nope'})
+    unknown = client.post('/api/auth/login', json={'email': 'nobody@saps.demo', 'password': 'nope'})
+    assert wrong.status_code == unknown.status_code == 401
+    assert wrong.json == unknown.json == {'ok': False, 'code': 'invalid_credentials',
+                                          'error': 'That email address and password do not match an account.'}
+    with client.session_transaction() as s:
+        assert 'user_id' not in s
+
+
+def test_empty_credentials(client):
+    r = client.post('/api/auth/login', json={'email': '', 'password': ''})
+    assert r.status_code == 400 and r.json['code'] == 'missing_credentials'
+
+
+def test_failed_sign_ins_are_audited(client):
+    client.post('/api/auth/login', json={'email': 'official@saps.demo', 'password': 'guess'})
+    last = AuditLog.query.order_by(AuditLog.id.desc()).first()
+    assert last.action_type == 'login_failed' and 'Sgt. M. Dlamini' in last.description
 
 
 def test_inactive_account(client):
     User.query.filter_by(email='official@saps.demo').one().is_active = False
     db.session.commit()
+    # Only the right password reveals that the account is switched off.
+    assert client.post('/api/auth/login', json={'email': 'official@saps.demo', 'password': 'x'}).json['code'] == 'invalid_credentials'
     assert client.post('/api/auth/login', json={'email': 'official@saps.demo', 'password': 'demo1234'}).status_code == 403
+
+
+def test_sign_in_page_lists_no_accounts_or_passwords(client):
+    page = client.get('/login').get_data(as_text=True)
+    assert 'demo1234' not in page and 'saps.demo' not in page and 'demoList' not in page
 
 
 def test_me_and_logout(client):

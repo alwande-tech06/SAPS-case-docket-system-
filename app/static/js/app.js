@@ -262,7 +262,7 @@ function renderPublicHeader() {
   const host = document.getElementById('chrome');
   if (!host) return;
   const page = location.pathname.split('/').pop();
-  const isLanding = page === 'index';
+  const isLanding = page === '';
 
   host.innerHTML = `
     <header class="masthead">
@@ -274,7 +274,7 @@ function renderPublicHeader() {
         </div>
         <div class="masthead-spacer"></div>
         ${isLanding ? `
-          <a class="btn btn-sm" href="/index">Home</a>
+          <a class="btn btn-sm" href="/">Home</a>
           <a class="btn btn-sm" href="/login">Staff sign in</a>` : ''}
       </div>
     </header>`;

@@ -42,6 +42,16 @@ def test_tracking_is_rate_limited(app, client):
 def test_demo_reset_only_in_demo_mode(app, client):
     app.config['DEMO_MODE'] = False
     assert client.post('/api/demo/reset', json={}).status_code == 404
+    # Not just hidden: the button is not in the page at all.
+    assert 'id="resetData"' not in client.get('/login').get_data(as_text=True)
+    app.config['DEMO_MODE'] = True
+    assert 'id="resetData"' in client.get('/login').get_data(as_text=True)
+
+
+def test_hidden_always_wins_in_the_stylesheet(client):
+    css = client.get('/static/css/style.css').get_data(as_text=True)
+    assert '[hidden] { display: none !important; }' in css
+    assert 'input[type="email"]' in css
 
 
 def test_production_refuses_a_weak_secret_key(monkeypatch):
@@ -53,7 +63,25 @@ def test_production_refuses_a_weak_secret_key(monkeypatch):
         create_app('production')
 
 
-@pytest.mark.parametrize('path', ['/track.html?ref=X&t=Y', '/index.html'])
+@pytest.mark.parametrize('path', ['/track.html?ref=X&t=Y', '/index.html', '/report.html'])
 def test_old_file_addresses_still_work(client, path):
     r = client.get(path)
     assert r.status_code == 301 and '.html' not in r.headers['Location']
+
+
+def test_the_site_opens_on_the_landing_page(client):
+    home = client.get('/').get_data(as_text=True)
+    assert 'js/report.js' not in home and 'href="/report"' in home and 'href="/track"' in home
+    assert 'js/report.js' in client.get('/report').get_data(as_text=True)
+    r = client.get('/index')
+    assert r.status_code == 301 and r.headers['Location'].endswith('/')
+    assert client.get('/index.html').headers['Location'] == '/'
+
+
+def test_sign_in_page_is_shown_even_when_already_signed_in(client):
+    from .conftest import login
+    login(client, 'official@saps.demo')
+    r = client.get('/login')
+    assert r.status_code == 200
+    page = r.get_data(as_text=True)
+    assert 'id="signedInCard"' in page and 'id="signInCard"' in page
