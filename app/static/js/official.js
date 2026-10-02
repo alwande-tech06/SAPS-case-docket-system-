@@ -6,16 +6,22 @@ if (me) { renderChrome('/dashboard-official'); render(); }
 
 function render() {
   const all = Store.intakes({ station_id: me.station_id });
+  /* What the complainant flagged as urgent comes first, then the priority the
+     crime category carries, then the oldest. */
   const pending = all.filter(i => i.disposition === 'pending')
-    .sort((a, b) => priorityRank(Store.priorityFor(b.category_id)) - priorityRank(Store.priorityFor(a.category_id))
+    .sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0)
+      || priorityRank(Store.priorityFor(b.category_id)) - priorityRank(Store.priorityFor(a.category_id))
       || new Date(a.created_at) - new Date(b.created_at));
   const overdue = pending.filter(i => ageHours(i.created_at) > 24);
+  const urgent = pending.filter(i => i.urgent);
 
   document.getElementById('tiles').innerHTML = `
     <div class="stat${pending.length ? ' alert' : ''}">
       <div class="n">${pending.length}</div><div class="k">Awaiting a decision</div></div>
     <div class="stat${overdue.length ? ' alert' : ''}">
       <div class="n">${overdue.length}</div><div class="k">Past 24 hours</div></div>
+    <div class="stat${urgent.length ? ' alert' : ''}">
+      <div class="n">${urgent.length}</div><div class="k">Flagged urgent</div></div>
     <div class="stat good">
       <div class="n">${all.filter(i => i.disposition === 'docket_opened').length}</div>
       <div class="k">Dockets opened</div></div>`;
@@ -27,8 +33,9 @@ function render() {
        on. The full list is a click away in the panel. */
     const ready = Rules.readiness(i.id);
     return `<tr data-row="${i.id}"${i.id === selectedId ? ' class="is-selected"' : ''}>
-      <td class="ref">${esc(i.intake_number)}</td>
-      <td>${Rules.badgeHtml(ready)}</td>
+      <td class="ref">${esc(i.intake_number)}
+        ${i.urgent ? '<div><span class="badge badge-urgent">Urgent</span></div>' : ''}</td>
+      <td>${Rules.badgeHtml(ready)}${infoBadge(i)}</td>
       <td>${esc(fmtDateTime(i.created_at))}</td>
       <td>${esc(Store.categoryName(i.category_id))}</td>
       <td>${priorityBadge(Store.priorityFor(i.category_id))}</td>
@@ -67,6 +74,25 @@ function render() {
   }).join('') : emptyRow(5, 'Nothing disposed of yet.');
 
   wire();
+}
+
+/* Where a request for more information stands: asked and waiting, or answered. */
+function infoBadge(i) {
+  if (!i.info_request) return '';
+  return i.info_responded_at
+    ? ' <span class="badge badge-good" title="The complainant answered your question">Answered</span>'
+    : ' <span class="badge badge-neutral" title="Waiting for the complainant to answer">Asked for more</span>';
+}
+
+function infoExchange(i) {
+  if (!i.info_request) return '';
+  return `<div class="notice${i.info_responded_at ? ' notice-good' : ''}" style="margin-top:.7rem">
+    <strong>${i.info_responded_at ? 'The complainant answered' : 'Waiting for the complainant'}</strong>
+    <span class="small muted">Asked ${esc(fmtDateTime(i.info_requested_at))} by ${esc(Store.userName(i.info_requested_by))}:</span>
+    ${esc(i.info_request)}
+    ${i.info_responded_at ? `<span class="small muted" style="display:block;margin-top:.4rem">Answered
+      ${esc(fmtDateTime(i.info_responded_at))}:</span>${esc(i.info_response)}` : ''}
+  </div>`;
 }
 
 /* Refusals this station has proposed, waiting with the station commander.
@@ -139,6 +165,10 @@ function renderQueuePanel() {
         A decision not to open a docket is waiting for a signature. Until it is signed, this
         report is still open and still counting towards the 24-hour reconciliation.</div>` : ''}
 
+      ${intake.urgent ? `<div class="notice notice-alert"><strong>Flagged urgent by the complainant</strong>
+        Read it now: they say the suspect or property can be found, evidence may be lost, or someone is at risk.</div>` : ''}
+      ${infoExchange(intake)}
+
       <h4 style="font-size:.9rem;margin:.9rem 0 .3rem">Before a docket can be opened</h4>
       <div id="panelChecklist"></div>
 
@@ -147,7 +177,10 @@ function renderQueuePanel() {
         <button class="btn btn-sm btn-danger" data-refuse="${intake.id}">Record refusal</button>
         <button class="btn btn-sm" data-refer="${intake.id}">Refer</button>
       </div>
-      <button class="btn btn-sm" data-view="${intake.id}" style="margin-top:.5rem">Open full details</button>
+      <div class="btn-row" style="margin-top:.5rem">
+        <button class="btn btn-sm" data-view="${intake.id}">Open full details</button>
+        <button class="btn btn-sm" data-ask="${intake.id}">Ask the complainant for more</button>
+      </div>
     </div>`;
 
   const res = Rules.render(document.getElementById('panelChecklist'), { intakeId: intake.id }, 'open_docket');
@@ -387,7 +420,15 @@ function wire() {
         <tr><th>Contact</th><td>${esc(c ? c.contact : '—')}</td></tr>
         <tr><th>Category</th><td>${esc(Store.categoryName(i.category_id))} · ${priorityBadge(Store.priorityFor(i.category_id))}</td></tr>
         <tr><th>Incident date</th><td>${esc(fmtDateTime(i.incident_datetime))}</td></tr>
-        <tr><th>Location</th><td>${esc(i.incident_location)}</td></tr>
+        <tr><th>Location</th><td>${esc(i.incident_location)}
+          ${i.latitude != null ? `<div class="small"><a href="${SapsMap.placeUrl(i.latitude, i.longitude)}" target="_blank"
+            rel="noopener">Marked on the map by the complainant</a> ·
+            <a href="${SapsMap.directionsUrl(i.latitude, i.longitude)}" target="_blank" rel="noopener">Directions</a></div>
+            <div id="detailMap" class="map map-sm"></div>` : ''}</td></tr>
+        <tr><th>Urgency</th><td>${i.urgent ? '<span class="badge badge-urgent">Flagged urgent by the complainant</span>'
+          : 'Not flagged'}</td></tr>
+        <tr><th>Email</th><td>${esc(c && c.email ? c.email : '—')}</td></tr>
+        <tr><th>Consent (POPIA)</th><td>${i.consent_at ? 'Given ' + esc(fmtDateTime(i.consent_at)) : '—'}</td></tr>
         <tr><th>Channel</th><td>${esc(labelChannel(i.channel))}</td></tr>
         <tr><th>Description</th><td>${esc(i.incident_description) || '<span class="muted">Not described online — statement to be taken in person</span>'}</td></tr>
       </table>
@@ -423,6 +464,29 @@ function wire() {
         : '<p class="small muted">None named.</p>'}
       <h3 style="margin-top:1.1rem">Evidence submitted by the complainant</h3>
       ${attachments.length ? `<div class="attachment-row">${attachments.map(a => fileChip(a)).join('')}</div>`
-        : '<p class="small muted">Nothing submitted yet.</p>'}`, () => {}, 'Close');
+        : '<p class="small muted">Nothing submitted yet.</p>'}
+      ${infoExchange(i)}`, () => {}, 'Close');
+    if (i.latitude != null) SapsMap.view('detailMap', i.latitude, i.longitude, esc(i.incident_location));
+  });
+
+  /* Not a decision: the report stays pending and keeps counting towards the
+     24-hour line while the complainant is asked. */
+  document.querySelectorAll('[data-ask]').forEach(b => b.onclick = () => {
+    const i = Store.intakes().find(x => x.id === Number(b.dataset.ask));
+    openModal('Ask the complainant for more information', `
+      <div class="notice"><strong>${esc(i.intake_number)}</strong>
+        ${esc(Store.categoryName(i.category_id))} · ${esc(i.incident_location)}</div>
+      <p class="small muted">They see your question on their tracking page and answer it there. This
+      does not dispose of the report — it still needs a decision, and the 24-hour clock keeps running.</p>
+      ${i.info_request && !i.info_responded_at ? `<div class="notice notice-alert"><strong>Already asked</strong>
+        Sending a new question replaces the one they have not answered yet.</div>` : ''}
+      <div class="field"><label for="askText">What do you need to know? <span class="req">*</span></label>
+        <textarea id="askText" placeholder="e.g. Which account number did you pay the money into?"></textarea></div>`,
+    async () => {
+      const res = await Store.requestInfo(i.id, me, document.getElementById('askText').value);
+      if (!res.ok) { toast(res.error, 'alert'); return false; }
+      toast('Question sent. The complainant sees it on their tracking page.');
+      render();
+    }, 'Send the question');
   });
 }

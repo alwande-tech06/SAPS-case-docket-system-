@@ -2,6 +2,41 @@
    app.js — shared UI helpers, role guard, page chrome
    ========================================================================== */
 
+/* ---------------- theme ----------------
+   Light or dark, chosen with the switch in the page header and remembered on
+   this device only (it is a display preference, not data). Each page also sets
+   it in <head> before drawing, so a dark page never flashes white. */
+function currentTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+function toggleTheme() {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next === 'dark' ? 'dark' : '';
+  try { localStorage.setItem('saps_theme', next); } catch (e) { /* not remembered, still switched */ }
+  document.querySelectorAll('[data-theme-toggle]').forEach(b => { b.innerHTML = themeIcon(); b.title = themeTitle(); });
+}
+/* Line icons, drawn here rather than as emoji: an emoji is a different
+   picture on every device and ignores the theme's colours; these take the
+   colour of the text around them. */
+function icon(paths) {
+  return `<svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+}
+const ICONS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12H5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/>',
+  moon: '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 21a2.2 2.2 0 0 0 4 0"/>',
+  user: '<circle cx="12" cy="8.2" r="3.7"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>'
+};
+function themeIcon() { return icon(currentTheme() === 'dark' ? ICONS.sun : ICONS.moon); }
+function themeTitle() { return currentTheme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'; }
+function themeButton() {
+  return `<button class="icon-btn" data-theme-toggle type="button" title="${themeTitle()}" aria-label="Switch theme">${themeIcon()}</button>`;
+}
+document.addEventListener('click', e => {
+  if (e.target.closest && e.target.closest('[data-theme-toggle]')) toggleTheme();
+});
+
 /* ---------------- formatting ---------------- */
 
 function fmtDate(iso) {
@@ -237,6 +272,15 @@ function renderChrome(activeHref) {
           <div class="masthead-sub">${esc(Store.stationName(s.station_id))}</div>
         </div>
         <div class="masthead-spacer"></div>
+        <div class="masthead-tools">
+          ${themeButton()}
+          <div class="bell-wrap">
+            <button class="icon-btn" id="bell" type="button" title="Notifications" aria-label="Notifications">${icon(ICONS.bell)}${
+              Store.unreadNotifications() ? `<span class="dot">${Store.unreadNotifications()}</span>` : ''}</button>
+            <div class="bell-panel" id="bellPanel" hidden></div>
+          </div>
+          <a class="icon-btn" href="/profile" title="My profile" aria-label="My profile">${icon(ICONS.user)}</a>
+        </div>
         <div class="masthead-user">
           <div>${esc(s.name)}</div>
           <div class="role">${esc(labelRole(s.role))}</div>
@@ -250,6 +294,38 @@ function renderChrome(activeHref) {
     await Store.logout();
     location.href = '/login';
   };
+  wireBell();
+}
+
+/* The bell lists what this person should look at. Opening it marks them read,
+   so the count is "new since I last looked". */
+function wireBell() {
+  const bell = document.getElementById('bell');
+  const panel = document.getElementById('bellPanel');
+  if (!bell || !panel) return;
+  const draw = () => {
+    const items = Store.myNotifications();
+    panel.innerHTML = `<header><span>Notifications</span>
+        <span class="small muted">${items.length ? 'Newest first' : ''}</span></header>
+      ${items.length ? items.map(n => {
+        const body = `${esc(n.message)}<span class="when">${esc(fmtDateTime(n.created_at))}</span>`;
+        const cls = 'bell-item' + (n.read_at ? '' : ' is-unread');
+        return n.link ? `<a class="${cls}" href="${esc(n.link)}">${body}</a>` : `<div class="${cls}">${body}</div>`;
+      }).join('') : '<div class="bell-item small muted">Nothing needs your attention.</div>'}`;
+  };
+  bell.onclick = async e => {
+    e.stopPropagation();
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    if (!opening) return;
+    draw();                                   /* shown with the unread ones still marked */
+    if (Store.unreadNotifications()) {
+      await Store.markNotificationsRead();
+      const dot = bell.querySelector('.dot');
+      if (dot) dot.remove();
+    }
+  };
+  document.addEventListener('click', e => { if (!panel.hidden && !panel.contains(e.target)) panel.hidden = true; });
 }
 
 /* ---------------- public header ---------------- */
@@ -275,7 +351,9 @@ function renderPublicHeader() {
         <div class="masthead-spacer"></div>
         ${isLanding ? `
           <a class="btn btn-sm" href="/">Home</a>
+          <a class="btn btn-sm" href="/stations">Find a station</a>
           <a class="btn btn-sm" href="/login">Staff sign in</a>` : ''}
+        ${themeButton()}
       </div>
     </header>`;
 }
@@ -397,6 +475,69 @@ function qrBlock(refNumber, caption, token) {
       '</svg>' +
       '<div class="qr-caption">' + esc(caption || 'Scan to track this report') + '</div>' +
     '</div>';
+}
+
+/* ---------------- the commander's supervisory review ----------------
+   Used from the oversight dashboard and from the case register, so the form
+   and its rules are the same wherever a review is recorded. */
+/* The holder sends the docket on. It stays theirs until the receiver signs. */
+function openSendDocket(d, me, done) {
+  const to = Store.transferRecipients(d.id, me.id);
+  openModal('Send this docket', `
+    <div class="notice"><strong class="ref">${esc(d.cas_number)}</strong>
+      The docket stays in your custody until the person you send it to signs for it.
+      Who investigates the case does not change.</div>
+    <div class="field"><label for="sdTo">Send to <span class="req">*</span></label>
+      <select id="sdTo">${to.map(u => `<option value="${u.id}">${esc(u.name)} — ${
+        u.role === 'commander' ? 'station commander' : 'investigating officer'}</option>`).join('')}</select></div>
+    <div class="field"><label for="sdWhy">Reason <span class="req">*</span></label>
+      <textarea id="sdWhy" style="min-height:80px" placeholder="e.g. For 24-hour inspection, with A1 statement and SAPS 13 entries"></textarea></div>`,
+  async () => {
+    const res = await Store.transferDocket(d.id, document.getElementById('sdTo').value, me, document.getElementById('sdWhy').value);
+    if (!res.ok) return false;
+    toast(`Sent to ${res.to.name}. It is yours until they sign for it.`);
+    done();
+  }, 'Send docket');
+}
+
+function openReviewModal(docketId, me, after) {
+  const d = Store.docket(docketId);
+  const last = Store.reviews(d.id)[0];
+  const notes = Store.notes(d.id).filter(n => n.note_type !== 'instruction');
+  const open = Store.instructions(d.id).filter(n => n.status === 'open');
+  openModal(`Supervisory review of ${d.cas_number}`, `
+    <p class="small muted">Detective: ${esc(d.detective_id ? Store.userName(d.detective_id) : 'unassigned')} ·
+      ${notes.length} diary entr(ies), last ${esc(Store.lastDiaryEntry(d.id) ? ageFrom(Store.lastDiaryEntry(d.id)) + ' ago' : 'never')} ·
+      ${Store.evidence(d.id).length} exhibit(s) · ${open.length} open instruction(s)</p>
+    ${last ? `<div class="notice"><strong>Last review ${esc(fmtDate(last.created_at))}</strong>
+      ${esc(Store.reviewOutcomeLabel(last.outcome))} — ${esc(last.review_notes)}</div>` : ''}
+    <div class="field"><label for="rvOutcome">Outcome <span class="req">*</span></label>
+      <select id="rvOutcome"><option value="">Select the outcome</option>
+        ${Store.reviewOutcomes().map(o => `<option value="${o.key}">${esc(o.label)}</option>`).join('')}</select></div>
+    <div class="field"><label for="rvNotes">What you inspected and found <span class="req">*</span></label>
+      <textarea id="rvNotes" placeholder="The state of the diary, statements, exhibits and forensic results."></textarea></div>
+    <div class="field" id="rvFurtherWrap" hidden>
+      <label for="rvFurther">Directive to the investigating officer <span class="req">*</span></label>
+      <textarea id="rvFurther" style="min-height:80px" placeholder="What must be done, and by when."></textarea>
+      <p class="hint">Recorded as an instruction in the diary. It blocks the docket from being filed until
+      the detective carries it out or explains why not.</p></div>
+    <div class="field"><label for="rvNext">Next review date</label>
+      <input type="date" id="rvNext">
+      <p class="hint">The docket comes back onto your dashboard on that date.</p></div>`, async () => {
+    const res = await Store.recordReview(d.id, me, {
+      outcome: document.getElementById('rvOutcome').value,
+      review_notes: document.getElementById('rvNotes').value,
+      further_action: document.getElementById('rvFurther').value,
+      next_review_date: document.getElementById('rvNext').value
+    });
+    if (!res.ok) { toast(res.error, 'alert'); return false; }
+    toast('Supervisory review recorded.');
+    if (after) after();
+  }, 'Certify and sign review');
+  const outcome = document.getElementById('rvOutcome');
+  outcome.onchange = () => {
+    document.getElementById('rvFurtherWrap').hidden = outcome.value !== 'further_directives';
+  };
 }
 
 /* ---------------- audit ledger renderer ---------------- */

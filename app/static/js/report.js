@@ -2,6 +2,95 @@
 
 renderPublicHeader();
 
+/* ---------------- the optional pin on the map ---------------- */
+/* The address box and the pin follow each other: typing an address puts the
+   pin on it, and marking a spot writes its address. Whichever of the two the
+   person set by hand is never overwritten by the other — a pin they placed
+   stays where they put it, and an address they typed is only replaced if
+   they ask ("Use this address"). */
+let pin = { lat: null, lng: null };
+let pinByHand = false;        // the pin was tapped, not found from the address
+let addressFromMap = '';      // what the map last wrote into the address box
+let lookupNo = 0;             // only the latest lookup's answer is used
+let lastSearched = '';
+const locationEl = document.getElementById('location');
+const pinText = document.getElementById('pinText');
+const useAddress = document.getElementById('useAddress');
+const marked = () => `Marked at ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}.`;
+
+function writeAddress(address) {
+  locationEl.value = address;
+  addressFromMap = address;
+  lastSearched = address;
+  useAddress.hidden = true;
+}
+
+const incidentMap = SapsMap.picker('incidentMap', async (lat, lng, byHand) => {
+  pin = { lat, lng };
+  pinByHand = lat != null && !!byHand;
+  document.getElementById('clearPin').hidden = lat == null;
+  useAddress.hidden = true;
+  if (lat == null) { pinText.textContent = 'No place marked.'; return; }
+  pinText.textContent = marked();
+  if (!byHand) return;
+  const mine = ++lookupNo;
+  const address = await SapsMap.addressAt(lat, lng);
+  if (mine !== lookupNo || !address) return;
+  const typed = locationEl.value.trim();
+  if (!typed || typed === addressFromMap) { writeAddress(address); return; }
+  if (typed.toLowerCase() === address.toLowerCase()) return;
+  pinText.textContent = `${marked()} That is ${address}.`;
+  useAddress.hidden = false;
+  useAddress.onclick = () => { writeAddress(address); pinText.textContent = marked(); };
+});
+
+async function pinTheAddress() {
+  const typed = locationEl.value.trim();
+  if (!incidentMap || pinByHand || typed.length < 4 || typed === lastSearched || typed === addressFromMap) return;
+  lastSearched = typed;
+  const mine = ++lookupNo;
+  const found = await SapsMap.find(typed);
+  if (mine !== lookupNo || pinByHand) return;
+  if (found) incidentMap.set(found.lat, found.lng);
+  else if (pin.lat == null) pinText.textContent = 'That address was not found on the map. You can tap the spot instead.';
+}
+
+/* No map (the library or the map tiles could not be loaded): the form works
+   without it, so the field is simply not shown. */
+if (!incidentMap) document.getElementById('mapField').hidden = true;
+else {
+  document.getElementById('clearPin').onclick = () => { lookupNo++; lastSearched = ''; incidentMap.clear(); };
+  /* Looked up once the address is finished — on leaving the box, or after a
+     pause in typing — never on each keystroke. */
+  /* The device's own position, for someone reporting from the scene. The
+     browser asks their permission first, and only offers it on a secure
+     (https) page; where it cannot, the button is not shown. */
+  const hereBtn = document.getElementById('useHere');
+  const hereNote = document.getElementById('hereNote');
+  if (!navigator.geolocation || !window.isSecureContext) { hereBtn.hidden = true; hereNote.hidden = true; }
+  else hereBtn.onclick = () => {
+    hereBtn.disabled = true;
+    hereNote.textContent = 'Finding where you are…';
+    navigator.geolocation.getCurrentPosition(pos => {
+      hereBtn.disabled = false;
+      const metres = Math.round(pos.coords.accuracy);
+      hereNote.textContent = metres > 100
+        ? `Marked to within about ${metres} m. Tap the map to correct it.`
+        : 'Marked. Tap the map if it is not quite right.';
+      incidentMap.set(pos.coords.latitude, pos.coords.longitude, true);
+    }, err => {
+      hereBtn.disabled = false;
+      hereNote.textContent = err.code === err.PERMISSION_DENIED
+        ? 'Location is switched off for this site. Type the address or tap the map instead.'
+        : 'Your location could not be found. Type the address or tap the map instead.';
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  };
+
+  let typing = null;
+  locationEl.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(pinTheAddress, 1500); });
+  locationEl.addEventListener('change', () => { clearTimeout(typing); pinTheAddress(); });
+}
+
 /* categories */
 const catSel = document.getElementById('category');
 Store.categories().forEach(c => {
@@ -279,6 +368,10 @@ document.getElementById('sendOtp').onclick = async () => {
     toast('You must be 18 or older to report online. An adult can report on your behalf, or you can report at any police station.', 'alert');
     return;
   }
+  if (!document.getElementById('consent').checked) {
+    toast('Tick the box to agree to your information being used to investigate this report.', 'alert');
+    return;
+  }
 
   /* The server sends the code — to the email if one was given, otherwise by
      SMS — and keeps it; this page never knows it, except on a demonstration
@@ -349,6 +442,10 @@ submitBtn.onclick = async () => {
         contact: document.getElementById('suspectContact').value
       } : null,
       witnesses: collectWitnesses(),
+      urgent: document.getElementById('urgent').checked,
+      consent: document.getElementById('consent').checked,
+      latitude: pin.lat,
+      longitude: pin.lng,
       otp
     });
     if (converted.attachments.length) await Store.addComplainantEvidence(rec.id, converted.attachments, '');
@@ -378,3 +475,5 @@ submitBtn.onclick = async () => {
   show(3);
   toast('Report submitted. Keep your reference number.');
 };
+
+document.getElementById('printReceipt').onclick = () => window.print();

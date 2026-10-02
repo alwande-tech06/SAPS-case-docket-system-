@@ -8,7 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/vendor-leaflet.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>try{if(localStorage.getItem('saps_theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 </head>
 <body>
 <div id="chrome"></div>
@@ -55,12 +57,34 @@
       <p class="hint">Your report is routed automatically to the police station responsible for this
         area based on the suburb or landmark you give. You do not need to work out which station that is.</p>
     </div>
+    <div class="field" id="mapField">
+      <label>Mark the place on the map <span class="small muted">(optional)</span></label>
+      <p class="hint" style="margin-top:0">The pin follows the address you type, and tapping the map fills in the
+        address of that spot. It helps the police find the scene; the address above is still what routes your report.</p>
+      <p style="margin:0 0 .5rem"><button type="button" class="btn btn-sm" id="useHere">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"
+             style="vertical-align:-3px;margin-right:.3rem"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22"/></svg>Use my current location</button>
+        <span class="small muted" id="hereNote">Only if you are still where it happened.</span></p>
+      <div id="incidentMap" class="map"></div>
+      <p class="small" style="margin:.4rem 0 0"><span id="pinText" class="muted" aria-live="polite">No place marked.</span>
+        <button type="button" class="btn-link" id="useAddress" hidden>Use this address</button>
+        <button type="button" class="btn-link" id="clearPin" hidden>Remove the pin</button></p>
+    </div>
     <div class="field">
       <label for="description">Describe what happened, in your own words <span class="req">*</span></label>
       <textarea id="description" style="min-height:150px" placeholder="What happened, when, who was involved, where it happened, why you think it happened, and how."></textarea>
       <p class="hint" id="descHint">Cover the <strong>what, when, who, where, why and how</strong> - this is what
         the sworn statement has to cover, so writing it now means you are not starting from
         nothing at the station. Use your own words; nothing here has to sound official.</p>
+    </div>
+    <div class="field">
+      <label class="check"><input type="checkbox" id="urgent">
+        <span><strong>This needs urgent attention at the station</strong>
+          <span class="small muted" style="display:block">For example: you know where the suspect or the
+          stolen property is right now, evidence may be lost, or someone is still at risk. Urgent reports
+          are shown first to the officials on duty. This is not an emergency line — if a crime is in
+          progress or someone is in danger, call 10111.</span></span></label>
     </div>
 
     <!-- filled per category from the category field specification -->
@@ -159,6 +183,15 @@
         If you are under 18, an adult can report for you, or you can report at any police station.</p>
     </div>
 
+    <div class="field">
+      <label class="check"><input type="checkbox" id="consent">
+        <span>I agree that the police may use the information in this report, including my personal
+          details, to investigate it and to contact me about it. <span class="req">*</span>
+          <span class="small muted" style="display:block">It is processed under the Protection of Personal
+          Information Act (POPIA), kept only for policing purposes, and shown only to the officials
+          working on your case. Every time it is opened is recorded.</span></span></label>
+    </div>
+
     <div id="otpBox" hidden>
       <div class="notice">
         <strong>Verification code sent</strong>
@@ -219,6 +252,7 @@
       </div>
       <div class="btn-row">
         <a class="btn btn-primary" href="{{ url_for('pages.track') }}">Track this report</a>
+        <button type="button" class="btn" id="printReceipt">Print or save this receipt</button>
         <a class="btn" href="{{ url_for('pages.index') }}">Done</a>
       </div>
     </div>
@@ -302,6 +336,8 @@
 <script src="{{ url_for('static', filename='js/store.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vendor-qrcode.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/vendor-leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/maps.js') }}"></script>
 <script src="{{ url_for('static', filename='js/report.js') }}"></script>
 </body>
 </html>

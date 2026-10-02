@@ -29,7 +29,7 @@ browser ── /api/... (JSON) ──────┘
 run.py / wsgi.py            Development server / production entry point
 config.py                   Settings (read from .env)
 app/__init__.py             Application factory, CLI commands
-app/models.py               The 27 tables
+app/models.py               The 31 tables
 app/routes/pages.py         One route per page, server-side role guard
 app/routes/api.py           The JSON API
 app/services/               The rules: intakes, dockets, admin, escalation, email, one-time codes, snapshots
@@ -38,7 +38,7 @@ app/scheduler.py            In-app timer for the overdue-report escalation
 app/seed.py                 Reference data and the demonstration data
 app/templates/, app/static/ The pages
 migrations/                 Database schema (Alembic)
-tests/                      132 tests, run with pytest
+tests/                      148 tests, run with pytest
 ```
 
 ## Running it locally
@@ -292,6 +292,33 @@ escalates a report twice.
 - Uploaded files are never served as something the browser would run: only
   images and PDFs display inline, everything else downloads, under a sandbox policy.
 
+## What each person can do
+
+**The public** — report a crime (`/report`): type and details of the incident, an optional pin on a map,
+an "urgent attention" flag, photos or documents, consent under POPIA, and a one-time code to confirm the
+report is theirs; print the receipt. Track it (`/track`) by reference and name, ID number, complainant
+number or the QR code: see its progress, answer a question from the station, add evidence, escalate,
+ask to withdraw or to reopen. Find a station (`/stations`) by area, on a map, with directions.
+
+**Police officials** — the queue of reports (urgent first), assisted capture, open a docket, propose
+a refusal (which needs the commander's signature), register-and-transfer, ask the complainant for more
+information.
+
+**Detectives** — sign for each docket allocated to them, keep the investigation diary (kind of entry,
+action, outcome, next step), witnesses and statements, exhibits and chain of custody, forensic
+submissions, arrests, handover to the prosecutor, request closure, answer the commander's instructions.
+
+**Station commanders** — the oversight dashboard (undisposed reports, escalations, dormant dockets,
+dockets not signed for, reviews due), second signature on refusals, closure decisions against the
+checklist, supervisory reviews with directives and a next review date, reassignment, withdrawals,
+the audit trail.
+
+**Administrators** — accounts (personnel number, role, station), one-time passwords, suspend,
+deactivate and reactivate, password resets, reference data, the audit trail.
+
+**Everyone on staff** — a notification bell for what needs their attention, a profile page
+(`/profile`) to change their password and phone number, and a light or dark theme.
+
 ## Routes
 
 | Route | Page | Who |
@@ -300,6 +327,7 @@ escalates a report twice.
 | `/report` | Report a crime | Public |
 | `/track` | Track a report, escalate, withdraw | Public (after proving it is theirs) |
 | `/guide`, `/what-happens-next` | Guides | Public |
+| `/stations` | Find a police station: by area, on a map, with directions | Public |
 | `/login` | Staff sign-in (if already signed in: continue or sign out), first-time password change, "Forgot your password?" | Staff |
 | `/reset-password` | Where an emailed reset link lands | Staff |
 | `/dashboard` | Redirects to the signed-in person's dashboard | Staff |
@@ -308,6 +336,7 @@ escalates a report twice.
 | `/dashboard-commander`, `/commander-cases`, `/commander-refusals`, `/commander-withdrawals` | Oversight | Station Commander |
 | `/dashboard-admin`, `/admin-reference` | Accounts, reference data | Administrator |
 | `/audit` | Audit ledger | Commander, Administrator |
+| `/profile` | Own account: details, phone number, change password | All staff |
 
 Old addresses (`/track.html?ref=...`, `/index`) redirect to these, so QR codes
 printed on earlier receipts still work.

@@ -659,3 +659,111 @@ tbody tr[data-row] { cursor: pointer; }
 .decision input:checked + span strong { color: var(--accent); }
 .decision label:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); }
 .decision strong { display: block; font-size: .92rem; }
+
+/* ==========================================================================
+   Dark theme — the same tokens, re-pointed. Chosen with the switch in the
+   page header and remembered on this device.
+   ========================================================================== */
+[data-theme="dark"] {
+  --ink:         #E7EAF0;
+  --muted:       #A2A9B6;
+  --muted-soft:  #7D8593;
+  --bg:          #0F1319;
+  --surface:     #181D26;
+  --surface-sunk:#141922;
+  --border:      #2A313D;
+  --border-soft: #222834;
+
+  --accent:      #7FA2FF;
+  --accent-hover:#9DB8FF;
+  --accent-wash: #1B2742;
+  --good:        #5FCB97;
+  --good-wash:   #14291F;
+  --alert:       #F08A7E;
+  --alert-wash:  #331A18;
+  --brass:       #D9B463;
+  --brass-wash:  #2E2715;
+  --critical:      #F28BA8;
+  --critical-wash: #33161F;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+[data-theme="dark"] .btn-primary, [data-theme="dark"] .crest { color: #0F1319; }
+[data-theme="dark"] .leaflet-container { filter: brightness(.85) contrast(1.05); }
+
+/* ---------------- header tools: bell, profile, theme ---------------- */
+.masthead-tools { display: flex; align-items: center; gap: .45rem; }
+.icon-btn {
+  position: relative; width: 34px; height: 34px; display: inline-grid; place-items: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+  color: var(--ink); font: inherit; font-size: .95rem; cursor: pointer; text-decoration: none; line-height: 1;
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn .dot {
+  position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; background: var(--alert); color: #fff; font-size: .68rem; font-weight: 700;
+  display: grid; place-items: center;
+}
+.bell-wrap { position: relative; }
+.bell-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); width: min(360px, 90vw); max-height: 70vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); z-index: 40; text-align: left;
+}
+.bell-panel header {
+  display: flex; justify-content: space-between; align-items: center; gap: .6rem;
+  padding: .7rem .9rem; border-bottom: 1px solid var(--border-soft); font-weight: 700; font-size: .9rem;
+}
+.bell-item { display: block; padding: .65rem .9rem; border-bottom: 1px solid var(--border-soft);
+  font-size: .86rem; color: var(--ink); text-decoration: none; }
+.bell-item:last-child { border-bottom: 0; }
+.bell-item.is-unread { background: var(--accent-wash); }
+.bell-item .when { display: block; color: var(--muted); font-size: .76rem; margin-top: .15rem; }
+a.bell-item:hover { background: var(--surface-sunk); }
+
+/* ---------------- urgency, maps, checks ---------------- */
+.badge-urgent { color: #fff; background: var(--alert); }
+[data-theme="dark"] .badge-urgent { color: #0F1319; }
+.map { height: 300px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: .5rem; z-index: 0; }
+.map-sm { height: 220px; }
+.check { display: flex; gap: .6rem; align-items: flex-start; font-size: .92rem; }
+.check input { margin-top: .25rem; width: 18px; height: 18px; flex: none; }
+.station-card { padding: .9rem 0; border-bottom: 1px solid var(--border-soft); }
+.station-card:last-child { border-bottom: 0; }
+
+/* ---------------- printing a receipt ---------------- */
+@media print {
+  .masthead, .tabs, .btn-row, .btn, .toast, .modal-back, .no-print, #chrome { display: none !important; }
+  body { background: #fff; color: #000; }
+  .card, .folder { box-shadow: none; border: 1px solid #999; }
+  a[href]::after { content: ""; }
+}
+
+.icon-btn .icon { display: block; }
+
+/* ---------------- the working file's steps to closure ---------------- */
+.flow { list-style: none; margin: 0 0 1.3rem; padding: 0; display: grid; gap: .7rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr)); counter-reset: none; }
+@media (max-width: 1000px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px)  { .flow { grid-template-columns: 1fr; } }
+.flow-step { position: relative; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-sunk); padding: .8rem .85rem .85rem; display: flex; flex-direction: column; }
+.flow-step.is-current { border-color: var(--accent); background: var(--accent-wash);
+  box-shadow: 0 0 0 1px var(--accent) inset; }
+.flow-step.is-done { border-color: var(--border); }
+.flow-head { display: flex; align-items: center; gap: .55rem; }
+.flow-num { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  font-size: .82rem; font-weight: 700; border: 1.5px solid var(--border); color: var(--muted); background: var(--surface); }
+.flow-step.is-current .flow-num { border-color: var(--accent); background: var(--accent); color: var(--surface); }
+.flow-step.is-done .flow-num { border-color: var(--good); background: var(--good); color: var(--surface); }
+.flow-now { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--accent); }
+.flow-step p { margin: .5rem 0 .7rem; flex: 1; }
+.flow-step .btn-row { margin: 0; gap: .4rem; }
+/* each stage leads to the next */
+.flow-step:not(:last-child)::after { content: ""; position: absolute; top: 20px; right: -.7rem; width: .7rem;
+  border-top: 2px solid var(--border); }
+@media (max-width: 1000px) { .flow-step::after { display: none; } }
+
+.custody { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0 0 .8rem; }

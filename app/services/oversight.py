@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from ..extensions import db
 from ..models import Escalation, Intake
-from .common import audit, now
+from .common import audit, now, tell_role
 
 OVERDUE_AFTER = timedelta(hours=24)
 REASON = 'Report undisposed for more than 24 hours'
@@ -36,6 +36,8 @@ def escalate_overdue(at=None):
                        decision_maker_id=None, routed_upward=False, status='open')
         db.session.add(e)
         db.session.flush()
+        tell_role(intake.station_id, 'commander', 'escalation',
+                  f'{intake.intake_number} has had no decision for more than 24 hours.')
         audit('escalate', f'System raised escalation: {intake.intake_number} undisposed for more than 24 hours',
               entity_type='escalation', entity_id=e.id)
         db.session.commit()

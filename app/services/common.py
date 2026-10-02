@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from flask import has_request_context, request
 
 from ..extensions import db
-from ..models import AuditLog, Notification, StoredFile, User
+from ..models import AuditLog, Notification, StaffNotification, StoredFile, User
 
 
 class ActionError(Exception):
@@ -97,6 +97,25 @@ def notify(intake, message, when=None):
                        created_at=when or now())
     db.session.add(rec)
     return rec
+
+
+# ----- staff notifications (the bell) -----
+
+ROLE_PAGE = {'official': '/dashboard-official', 'detective': '/dashboard-detective',
+             'commander': '/dashboard-commander', 'admin': '/dashboard-admin'}
+
+
+def tell(user_ids, kind, message, link=None, exclude=None):
+    """Puts a notification in each of these people's bell."""
+    when = now()
+    for uid in dict.fromkeys(u for u in user_ids if u and u != exclude):
+        db.session.add(StaffNotification(user_id=uid, kind=kind, message=message, link=link, created_at=when))
+
+
+def tell_role(station_id, role, kind, message, exclude=None):
+    """Tells every active person in a role at a station."""
+    ids = [u.id for u in User.query.filter_by(station_id=station_id, role=role, is_active=True)]
+    tell(ids, kind, message, ROLE_PAGE.get(role), exclude)
 
 
 def add_months(dt, months):

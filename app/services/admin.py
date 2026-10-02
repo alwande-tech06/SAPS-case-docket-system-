@@ -8,7 +8,7 @@ from datetime import timedelta, timezone
 from flask import current_app
 
 from ..extensions import db
-from ..models import ROLES, Docket, Evidence, PasswordReset, Specialisation, Station, User
+from ..models import ROLES, Docket, Evidence, PasswordReset, Specialisation, StaffNotification, Station, User
 from .common import ActionError, audit, label_role, now, text
 from .mail import send_email
 
@@ -46,6 +46,14 @@ def save_user(payload, actor):
     clash = User.query.filter(db.func.lower(User.email) == email).first()
     if clash is not None and (u is None or clash.id != u.id):
         return {'ok': False, 'error': 'Another account already uses that email address.'}
+    personnel = text(payload.get('personnel_number')) or None
+    if personnel:
+        same = User.query.filter_by(personnel_number=personnel).first()
+        if same is not None and (u is None or same.id != u.id):
+            return {'ok': False, 'error': 'Another account already has that personnel number.'}
+    phone = text(payload.get('phone')) or None
+    if phone and not re.fullmatch(r'[+\d][\d\s()-]{6,18}', phone):
+        return {'ok': False, 'error': 'That phone number is not valid.'}
 
     temporary = None
     if u is not None:
@@ -53,6 +61,7 @@ def save_user(payload, actor):
             return {'ok': False, 'error': 'You cannot remove your own administrator role.'}
         u.name, u.email, u.role, u.rank, u.station_id = name, email, role, text(payload.get('rank')), station.id
         u.specialisation_id = spec.id if spec else None
+        u.personnel_number, u.phone = personnel, phone
         if payload.get('availability') in ('available', 'on_leave'):
             u.availability = payload['availability']
         audit('update', f'Account updated: {u.name}', actor, entity_type='user', entity_id=u.id)
@@ -60,7 +69,8 @@ def save_user(payload, actor):
         temporary = secrets.token_urlsafe(9)
         u = User(name=name, email=email, role=role, rank=text(payload.get('rank')), station_id=station.id,
                  specialisation_id=spec.id if spec else None, availability='available',
-                 max_caseload=12 if role == 'detective' else 0, is_active=True, must_change_password=True)
+                 max_caseload=12 if role == 'detective' else 0, is_active=True, must_change_password=True,
+                 personnel_number=personnel, phone=phone, account_status='active')
         u.set_password(temporary)
         db.session.add(u)
         db.session.flush()
@@ -80,8 +90,58 @@ def deactivate_user(user_id, actor):
     held = Evidence.query.filter_by(current_holder_id=u.id).count()
     if held:
         return {'ok': False, 'error': f'{u.name} still holds {held} exhibit(s). Transfer them before deactivating this account.'}
-    u.is_active, u.deactivated_at = False, now()
+    u.is_active, u.deactivated_at, u.account_status = False, now(), 'deactivated'
     audit('deactivate', f'Account deactivated: {u.name}. Activity record retained.', actor, entity_type='user', entity_id=u.id)
+    return {'ok': True}
+
+
+def suspend_user(user_id, actor, reason):
+    """Access switched off for now — an investigation, extended leave — and
+    liftable later. Unlike deactivation it needs a reason, and their cases stay
+    with them until the commander reassigns."""
+    u = db.session.get(User, int(user_id)) if str(user_id).isdigit() else None
+    if u is None:
+        return {'ok': False, 'error': 'Account not found.'}
+    if u.id == actor.id:
+        return {'ok': False, 'error': 'You cannot suspend your own account.'}
+    if u.account_status != 'active':
+        return {'ok': False, 'error': 'Only an active account can be suspended.'}
+    reason = text(reason)
+    if len(reason) < 10:
+        return {'ok': False, 'error': 'Record why this account is being suspended.'}
+    u.is_active, u.account_status, u.status_reason = False, 'suspended', reason
+    u.session_version = (u.session_version or 0) + 1        # signs them out everywhere
+    audit('suspend', f'Account suspended: {u.name} — {reason}', actor, entity_type='user', entity_id=u.id)
+    return {'ok': True, 'user': u.to_dict()}
+
+
+def reactivate_user(user_id, actor):
+    """Lifts a suspension, or brings back a deactivated account."""
+    u = db.session.get(User, int(user_id)) if str(user_id).isdigit() else None
+    if u is None:
+        return {'ok': False, 'error': 'Account not found.'}
+    if u.account_status == 'active' and u.is_active:
+        return {'ok': False, 'error': 'That account is already active.'}
+    was = u.account_status
+    u.is_active, u.account_status, u.status_reason, u.deactivated_at = True, 'active', None, None
+    audit('reactivate', f'Account reactivated: {u.name} (was {was})', actor, entity_type='user', entity_id=u.id)
+    return {'ok': True, 'user': u.to_dict()}
+
+
+def update_profile(user, payload):
+    """What a person may change about their own account: their phone number."""
+    phone = text(payload.get('phone')) or None
+    if phone and not re.fullmatch(r'[+\d][\d\s()-]{6,18}', phone):
+        return {'ok': False, 'error': 'That phone number is not valid.'}
+    user.phone = phone
+    audit('update', f'{user.name} updated their contact number', user, entity_type='user', entity_id=user.id)
+    return {'ok': True, 'user': user.to_dict()}
+
+
+def mark_notifications_read(user):
+    when = now()
+    for n in StaffNotification.query.filter_by(user_id=user.id, read_at=None):
+        n.read_at = when
     return {'ok': True}
 
 

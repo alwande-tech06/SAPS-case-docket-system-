@@ -286,13 +286,30 @@ function render(res) {
       ${stampBlock(d ? 'Case number' : 'Report reference', ref, d || i.disposition === 'docket_opened' ? 'Registered' : 'Pending')}
       ${qrBlock(ref, 'Scan to track this case', i.track_token)}
     </div>
+    <p class="no-print" style="margin:.6rem 0 0"><button type="button" class="btn btn-sm" id="printStatus">Print or save
+      this as proof of your report</button></p>
 
     <div class="card" style="margin-top:1rem">
       <div class="card-head">
         <h2>${esc(Store.categoryName(i.category_id))}</h2>
         <span class="badge ${d ? 'badge-neutral' : 'badge-alert'}">${esc(status)}</span>
       </div>
-      <p class="small muted">Reported ${esc(fmtDateTime(i.created_at))} · ${esc(Store.stationName(i.station_id))}</p>
+      <p class="small muted">Reported ${esc(fmtDateTime(i.created_at))} · ${esc(Store.stationName(i.station_id))}
+        ${i.urgent ? ' · <span class="badge badge-urgent">You flagged this as urgent</span>' : ''}</p>
+
+      ${i.info_request ? (i.info_responded_at ? `<div class="notice notice-good">
+          <strong>You answered the station's question</strong>
+          <span class="small muted">They asked: </span>${esc(i.info_request)}
+          <span class="small muted" style="display:block;margin-top:.3rem">You answered ${esc(fmtDateTime(i.info_responded_at))}: </span>${esc(i.info_response)}
+        </div>` : `<div class="notice notice-alert no-print">
+          <strong>The station needs more information from you</strong>
+          ${esc(i.info_request)}
+          <div class="field" style="margin-top:.7rem">
+            <label for="infoAnswer">Your answer <span class="req">*</span></label>
+            <textarea id="infoAnswer" style="min-height:90px" placeholder="Write what they asked for. You can also add photos or documents below."></textarea>
+          </div>
+          <button class="btn btn-primary btn-sm" id="sendInfo">Send my answer</button>
+        </div>`) : ''}
 
       ${overdue ? `<div class="notice notice-alert">
         <strong>No case number has been issued</strong>
@@ -376,6 +393,20 @@ function render(res) {
     toast('Escalation sent to the station commander.');
     render(Store.track(ref, document.getElementById('fullname').value.trim()));
   };
+
+  const ibtn = document.getElementById('sendInfo');
+  if (ibtn) ibtn.onclick = async () => {
+    if (ibtn.disabled) return;
+    ibtn.disabled = true;
+    const out = await Store.respondInfo(i.id, document.getElementById('infoAnswer').value);
+    ibtn.disabled = false;
+    if (!out.ok) { toast(out.error, 'alert'); return; }
+    toast('Your answer has been sent to the station.');
+    render(Store.track(ref, document.getElementById('fullname').value.trim()));
+  };
+
+  const pbtn = document.getElementById('printStatus');
+  if (pbtn) pbtn.onclick = () => window.print();
 
   const rbtn = document.getElementById('requestReopen');
   if (rbtn) rbtn.onclick = async () => {

@@ -41,11 +41,23 @@ def current_user():
     user = db.session.get(User, user_id)
     # A sign-in from before the password last changed no longer counts.
     if user is None or not user.is_active or session.get('sv') != user.session_version:
+        # Switched off while signed in: they are told why, once, as they are signed out.
+        if user is not None and session.get('sv') is not None and user.account_status in ('suspended', 'deactivated'):
+            request.environ['saps.account_off'] = user.account_status
         session.pop('user_id', None)
         session.pop('role', None)
         session.pop('sv', None)
         return None
     return user
+
+
+def signed_out(message='Sign in to continue.'):
+    """The answer to someone with no valid sign-in. If their account was just
+    switched off, it says so instead of only sending them to the sign-in form."""
+    off = request.environ.get('saps.account_off')
+    if off:
+        return error(f'This account has been {off}. Speak to your system administrator.', 'inactive', 401)
+    return error(message, 'unauthenticated', 401)
 
 
 def tracked_ids():
@@ -115,7 +127,8 @@ def login():
         return error(BAD_CREDENTIALS, 'invalid_credentials', 401)
     # Only someone who knows the password learns the account is switched off.
     if not user.is_active:
-        return error('This account has been deactivated. Speak to your system administrator.', 'inactive', 403)
+        state = 'suspended' if user.account_status == 'suspended' else 'deactivated'
+        return error(f'This account has been {state}. Speak to your system administrator.', 'inactive', 403)
     user.last_login = datetime.now(timezone.utc)
     audit('login', f'{user.name} signed in', user, entity_type='user', entity_id=user.id)
     db.session.commit()
@@ -141,7 +154,7 @@ def logout():
 def me():
     user = current_user()
     if user is None:
-        return error('Not signed in.', 'unauthenticated', 401)
+        return signed_out('Not signed in.')
     return jsonify({'ok': True, 'user': user.to_session(), 'must_change_password': user.must_change_password})
 
 
@@ -150,7 +163,7 @@ def me():
 def change_password():
     user = current_user()
     if user is None:
-        return error('Sign in to continue.', 'unauthenticated', 401)
+        return signed_out()
     data = body()
     res = admin_svc.change_password(user, data.get('current'), data.get('new'))
     db.session.commit()
@@ -338,11 +351,14 @@ def arg(a, key):
     return a[key]
 
 
+ALL_STAFF = ('official', 'detective', 'commander', 'admin')
+
 STAFF_ACTIONS = {
     # intake
     'openDocket': (('official', 'commander'),
                    lambda u, a: intake_svc.open_docket(arg(a, 'intakeId'), u, a.get('options') or {})),
     'recordRefusal': (('official',), lambda u, a: intake_svc.record_refusal(arg(a, 'intakeId'), u, a.get('payload') or {})),
+    'requestInfo': (('official',), lambda u, a: intake_svc.request_info(arg(a, 'intakeId'), u, a.get('message'))),
     'cosignRefusal': (('commander',), lambda u, a: intake_svc.cosign_refusal(
         arg(a, 'refusalId'), u, bool(a.get('agree')), a.get('note'), a.get('options') or {})),
     'registerAndTransfer': (('official',), lambda u, a: intake_svc.register_and_transfer(
@@ -362,7 +378,12 @@ STAFF_ACTIONS = {
     'reopenDocket': (('detective', 'commander'), lambda u, a: docket_svc.reopen_by_staff(
         arg(a, 'docketId'), u, a.get('payload') or {})),
     'noteBroughtForwardReview': (('commander',), lambda u, a: docket_svc.note_brought_forward_review(arg(a, 'docketId'), u)),
-    'addNote': (('detective',), lambda u, a: docket_svc.add_note(arg(a, 'docketId'), u, a.get('text'))),
+    'addNote': (('detective',), lambda u, a: docket_svc.add_note(arg(a, 'docketId'), u, a.get('text'), a.get('entry'))),
+    'acknowledgeDocket': (('detective', 'commander'),
+                          lambda u, a: docket_svc.acknowledge_docket(arg(a, 'docketId'), u, a.get('note'))),
+    'transferDocket': (('detective', 'commander'),
+                       lambda u, a: docket_svc.transfer_docket(arg(a, 'docketId'), u, arg(a, 'toUserId'), a.get('reason'))),
+    'recordReview': (('commander',), lambda u, a: docket_svc.record_review(arg(a, 'docketId'), u, a.get('payload') or {})),
     'addInstruction': (('commander',), lambda u, a: docket_svc.add_instruction(arg(a, 'docketId'), u, a.get('text'))),
     'answerInstruction': (('detective',), lambda u, a: docket_svc.answer_instruction(
         arg(a, 'noteId'), u, a.get('outcome'), a.get('response'))),
@@ -383,6 +404,11 @@ STAFF_ACTIONS = {
     'saveUser': (('admin',), lambda u, a: admin_svc.save_user(a.get('payload') or {}, u)),
     'deactivateUser': (('admin',), lambda u, a: admin_svc.deactivate_user(arg(a, 'id'), u)),
     'resetUserPassword': (('admin',), lambda u, a: admin_svc.reset_user_password(arg(a, 'id'), u)),
+    'suspendUser': (('admin',), lambda u, a: admin_svc.suspend_user(arg(a, 'id'), u, a.get('reason'))),
+    'reactivateUser': (('admin',), lambda u, a: admin_svc.reactivate_user(arg(a, 'id'), u)),
+    # every signed-in member of staff, about their own account
+    'updateProfile': (ALL_STAFF, lambda u, a: admin_svc.update_profile(u, a.get('payload') or {})),
+    'markNotificationsRead': (ALL_STAFF, lambda u, a: admin_svc.mark_notifications_read(u)),
 }
 
 
@@ -406,6 +432,7 @@ COMPLAINANT_ACTIONS = {
         tracked_docket_intake(arg(a, 'docketId')), a.get('newEvidence')),
     'requestWithdrawal': lambda a: intake_svc.request_withdrawal(
         tracked_intake(arg(a, 'intakeId')).id, a.get('payload') or {}),
+    'respondInfo': lambda a: intake_svc.respond_info(tracked_intake(arg(a, 'intakeId')), a.get('response')),
     'addComplainantEvidence': lambda a: intake_svc.add_complainant_evidence(
         tracked_intake(arg(a, 'intakeId')).id, a.get('files') or [], a.get('description')),
 }
@@ -423,7 +450,7 @@ def action(name):
             roles, fn = STAFF_ACTIONS[name]
             user = current_user()
             if user is None:
-                return error('Sign in to continue.', 'unauthenticated', 401)
+                return signed_out()
             if user.must_change_password:
                 return error('Change your password before continuing.', 'password_change_required', 403)
             if user.role not in roles:

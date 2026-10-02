@@ -10,17 +10,19 @@ nothing else:
   anyone else  — reference data only
 """
 from ..models import (Arrest, Assignment, AuditLog, Category, Closure, Complainant, ComplainantEvidence, Custody,
-                      Docket, Escalation, Evidence, Forensic, Handover, Intake, Note, Notification, Refusal,
-                      Specialisation, Station, StatusHistory, Transfer, User, Witness, Withdrawal)
+                      Docket, DocketMovement, Escalation, Evidence, Forensic, Handover, Intake, Note, Notification,
+                      Refusal, Specialisation, StaffNotification, Station, StatusHistory, SupervisoryReview, Transfer,
+                      User, Witness, Withdrawal)
 
 TABLES = ['stations', 'specialisations', 'categories', 'users', 'complainants', 'intakes', 'dockets', 'refusals',
           'escalations', 'assignments', 'status_history', 'notes', 'evidence', 'custody', 'arrests', 'handovers',
           'audit_log', 'complainant_evidence', 'withdrawals', 'notifications', 'closures', 'transfers', 'witnesses',
-          'forensics']
+          'forensics', 'docket_movements', 'reviews']
 
 BY_DOCKET = {'assignments': Assignment, 'status_history': StatusHistory, 'notes': Note, 'evidence': Evidence,
              'arrests': Arrest, 'handovers': Handover, 'closures': Closure, 'transfers': Transfer,
-             'witnesses': Witness, 'forensics': Forensic}
+             'witnesses': Witness, 'forensics': Forensic, 'docket_movements': DocketMovement,
+             'reviews': SupervisoryReview}
 BY_INTAKE = {'refusals': Refusal, 'notifications': Notification, 'withdrawals': Withdrawal,
              'complainant_evidence': ComplainantEvidence}
 
@@ -44,6 +46,9 @@ def build(user=None, tracked_ids=(), demo_mode=False):
     snap['me'] = user.to_session() if user else None
     snap['must_change_password'] = bool(user and user.must_change_password)
     snap['demo_mode'] = demo_mode
+    # The bell: this person's latest notifications, newest first.
+    snap['my_notifications'] = [n.to_dict() for n in StaffNotification.query.filter_by(user_id=user.id)
+                                .order_by(StaffNotification.id.desc()).limit(30)] if user else []
     snap['audit_chain'] = {'ok': True, 'entries': 0}
 
     if user is not None:
@@ -63,8 +68,11 @@ def build(user=None, tracked_ids=(), demo_mode=False):
             intakes = _in(Intake, 'id', intake_ids)
         snap['users'] = _dicts(User.query)
         if user.role != 'admin':
+            # Colleagues' names and roles, not their contact details or account notes.
             for u in snap['users']:
-                u.pop('email', None)
+                if u['id'] != user.id:
+                    for private in ('email', 'phone', 'personnel_number', 'status_reason'):
+                        u.pop(private, None)
     else:
         intakes = _in(Intake, 'id', list(tracked_ids))
         dockets = Docket.query.filter(Docket.intake_id.in_(list(tracked_ids) or [-1]))
@@ -85,8 +93,8 @@ def build(user=None, tracked_ids=(), demo_mode=False):
         snap['status_history'] = _dicts(_in(StatusHistory, 'docket_id', docket_ids))
         snap['arrests'] = [{'id': a.id, 'docket_id': a.docket_id} for a in _in(Arrest, 'docket_id', docket_ids)]
         for i in snap['intakes']:
-            i.pop('created_by', None)
-            i.pop('disposed_by', None)
+            for staff_field in ('created_by', 'disposed_by', 'info_requested_by'):
+                i.pop(staff_field, None)
         return snap
 
     for name, model in BY_DOCKET.items():

@@ -68,8 +68,14 @@ def init_app(app):
     def headers(resp):
         resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
         resp.headers.setdefault('X-Frame-Options', 'DENY')
-        resp.headers.setdefault('Referrer-Policy', 'same-origin')
-        resp.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+        # To another site, only this site's address is sent — never the page or
+        # its query string, so a reset or tracking token cannot leak. (Sending
+        # nothing at all gets the map tiles refused: OpenStreetMap requires a
+        # Referer.)
+        resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        # Location is for this site's own pages only ("Use my current location"
+        # on the report form), never for anything embedded in them.
+        resp.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)')
         if app.config.get('SESSION_COOKIE_SECURE'):
             resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         # Pages carry case data in them, so nothing but static files is cached.

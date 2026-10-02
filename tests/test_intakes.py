@@ -15,6 +15,7 @@ def report(**overrides):
         'details': {'what_taken': 'Phone', 'blank': '  '},
         'suspect': {'name': '', 'description': 'Tall, red cap'},
         'witnesses': [{'name': 'Sipho', 'contact': ''}, {'name': '  '}],
+        'consent': True,
     }
     data.update(overrides)
     return data

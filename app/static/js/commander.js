@@ -73,6 +73,28 @@ function render() {
     type: 'Not handed to a detective within 24 hours',
     action: `<button class="btn btn-sm btn-primary" data-reassign="${d.id}">Allocate</button>` }));
 
+  /* NI 3/2011 s1.4.10 — allocated, but the detective has not signed for it. */
+  Store.unacknowledgedDockets(st).forEach(x => rows.push({
+    ref: x.docket.cas_number, at: x.movement.sent_at, sla: `Overdue ${ageFrom(x.movement.sent_at)}`, late: true,
+    type: `Docket not signed for by ${Store.userName(x.movement.to_user_id)}`,
+    action: `<button class="btn btn-sm" data-reassign="${x.docket.id}">Reassign</button>` }));
+
+  /* Dockets sent to me: mine to sign for. Dockets I hold: mine to send back. */
+  Store.docketsAwaiting(me.id).forEach(x => rows.push({
+    ref: x.docket.cas_number, at: x.movement.sent_at, sla: '—', late: false,
+    type: `Docket sent to you by ${Store.userName(x.movement.from_user_id)} — ${x.movement.reason}`,
+    action: `<button class="btn btn-sm btn-primary" data-ack="${x.docket.id}">Acknowledge receipt</button>` }));
+  Store.docketsHeldBy(me.id, st).forEach(d => rows.push({
+    ref: d.cas_number, at: d.last_activity_at || d.registered_at, sla: '—', late: false,
+    type: 'Docket in your custody',
+    action: `<button class="btn btn-sm" data-senddocket="${d.id}">Send docket</button>` }));
+
+  /* A supervisory review whose next date has arrived. */
+  Store.reviewsDue(st).forEach(x => rows.push({
+    ref: x.docket.cas_number, at: x.last.next_review_date, sla: '—', late: false,
+    type: 'Supervisory review due',
+    action: `<button class="btn btn-sm btn-primary" data-review="${x.docket.id}">Review</button>` }));
+
   document.getElementById('attentionBody').innerHTML = rows.length ? rows.map(r => `
     <tr>
       <td class="ref">${esc(r.ref)}</td>
@@ -154,6 +176,22 @@ function render() {
 }
 
 function wire() {
+  document.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => {
+    const d = Store.docket(Number(b.dataset.ack));
+    openModal('Acknowledge receipt of this docket', `
+      <p class="small">You are signing that the docket ${esc(d.cas_number)} has reached you. It is in your
+      custody from now until someone else signs for it.</p>
+      <div class="field"><label for="ackNote">Note on its condition or contents</label>
+        <input type="text" id="ackNote" placeholder="Optional, e.g. received with 2 statements and 3 photographs"></div>`,
+    async () => {
+      const res = await Store.acknowledgeDocket(d.id, me, document.getElementById('ackNote').value);
+      if (!res.ok) return false;
+      toast('Receipt of the docket recorded.'); render();
+    }, 'Acknowledge receipt');
+  });
+  document.querySelectorAll('[data-senddocket]').forEach(b => b.onclick = () =>
+    openSendDocket(Store.docket(Number(b.dataset.senddocket)), me, render));
+
   document.querySelectorAll('[data-esc]').forEach(b => b.onclick = () => {
     const e = Store.escalations().find(x => x.id === Number(b.dataset.esc));
     const d = e.docket_id ? Store.docket(e.docket_id) : null;
@@ -262,6 +300,9 @@ function wire() {
     if (!approveBtn.disabled) approveBtn.onclick = () => decide('approved');
     document.getElementById('rejectClosure').onclick = () => decide('refused');
   });
+
+  document.querySelectorAll('[data-review]').forEach(b => b.onclick = () =>
+    openReviewModal(Number(b.dataset.review), me, render));
 
   /* Diagram 6 — the brought-forward review on a filed docket. */
   document.querySelectorAll('[data-bf]').forEach(b => b.onclick = () => {

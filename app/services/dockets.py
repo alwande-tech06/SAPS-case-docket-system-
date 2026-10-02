@@ -5,11 +5,30 @@ same, because the pages turn the codes into "Why is this blocked?" links.
 Results are dicts in the shape the pages already read ({'ok': ..., ...}).
 """
 from ..extensions import db
-from ..models import (Arrest, Assignment, Category, Closure, Counter, Custody, Docket, Escalation,
-                      Evidence, Forensic, Handover, Intake, Note, Station, StatusHistory, User, Witness,
-                      Withdrawal)
-from .common import (FILING_CATEGORIES, REASSIGNMENT_REASONS, REOPEN_TRIGGERS, ActionError, add_months,
-                     audit, label_role, label_status, notify, now, store_data_url, text, user_name)
+from datetime import datetime, timezone
+
+from ..models import (Arrest, Assignment, Category, Closure, Counter, Custody, Docket, DocketMovement, Escalation,
+                      Evidence, Forensic, Handover, Intake, Note, Station, StatusHistory, SupervisoryReview, User,
+                      Witness, Withdrawal)
+from .common import (FILING_CATEGORIES, MIN_REASON_LENGTH, REASSIGNMENT_REASONS, REOPEN_TRIGGERS, ROLE_PAGE, ActionError,
+                     add_months, audit, label_role, label_status, notify, now, store_data_url, tell, tell_role, text,
+                     user_name)
+
+# What a diary entry records, beyond free text.
+DIARY_ENTRY_TYPES = {
+    'investigation_note': 'Investigation note',
+    'witness_interview': 'Witness interview',
+    'evidence_catalogued': 'Evidence catalogued',
+    'court_update': 'Court or NPA update',
+    'complainant_update': 'Complainant updated',
+}
+
+REVIEW_OUTCOMES = {
+    'satisfactory': 'Investigation satisfactory',
+    'further_directives': 'Further directives issued',
+    'ready_for_court': 'Ready for NPA / court referral',
+    'closure_recommended': 'Docket closure recommended',
+}
 
 
 # ----- access -----
@@ -64,6 +83,7 @@ def auto_assign(docket, when=None):
     db.session.add(Assignment(docket_id=docket.id, detective_id=pick.id, assigned_by=None, assigned_at=when,
                               assignment_method='auto_by_category', is_active=True))
     docket.detective_id = pick.id
+    send_docket(docket, docket.registered_by, pick, 'Allocated automatically by crime category', when)
     audit('assign', f'{docket.cas_number} auto-assigned to {pick.name} ({cat.name if cat else "general"}, '
           'lowest caseload)', entity_type='assignment', entity_id=docket.id, case_id=docket.id, performed_at=when)
     return pick
@@ -96,6 +116,88 @@ def open_docket_internal(intake, actor, when=None):
                                identified_by=actor.id, identified_at=when, reported_by_complainant=True))
     assigned = auto_assign(d, when)
     return d, assigned
+
+
+SUPERSEDED = 'Superseded: the docket was moved again before it was signed for.'
+
+
+def send_docket(docket, from_user_id, to_user, reason, when=None, message=None):
+    """Records the docket leaving one person for another. The receiver must
+    acknowledge it; an earlier movement nobody signed for is superseded."""
+    when = when or now()
+    for m in DocketMovement.query.filter_by(docket_id=docket.id, acknowledged_at=None):
+        m.acknowledgement_note = SUPERSEDED
+        m.acknowledged_at = when
+    db.session.add(DocketMovement(docket_id=docket.id, from_user_id=from_user_id, to_user_id=to_user.id,
+                                  reason=reason, sent_at=when))
+    tell([to_user.id], 'docket',
+         message or f'{docket.cas_number} has been allocated to you. Acknowledge receipt of the docket.',
+         ROLE_PAGE.get(to_user.role))
+
+
+def custodian_id(docket):
+    """Who holds the docket: the last person to sign for it. Sending a docket
+    does not hand over custody — it stays with the sender until the receiver
+    signs. Before anyone has signed, it is with whoever first sent it on."""
+    moves = DocketMovement.query.filter_by(docket_id=docket.id).order_by(DocketMovement.id).all()
+    signed = [m for m in moves if m.acknowledged_at and m.acknowledgement_note != SUPERSEDED]
+    if signed:
+        return signed[-1].to_user_id
+    return moves[0].from_user_id if moves else None
+
+
+def transfer_docket(docket_id, actor, to_user_id, reason):
+    """The person holding the docket sends it on — to the station commander
+    for inspection, or back to the officer investigating it. Who investigates
+    does not change: giving a docket to a different detective is a
+    reassignment, and only the commander makes those."""
+    d = get_docket(docket_id, actor, detective_must_hold=False)
+    if d.current_status == 'closed':
+        return {'ok': False, 'error': 'A filed docket is not moved. Reopen it first.'}
+    waiting = DocketMovement.query.filter_by(docket_id=d.id, acknowledged_at=None).first()
+    if waiting is not None:
+        to = db.session.get(User, waiting.to_user_id)
+        return {'ok': False, 'code': 'in_transit',
+                'error': f'This docket is already on its way to {to.name} and has not been signed for yet.'}
+    if custodian_id(d) != actor.id:
+        return {'ok': False, 'code': 'not_custodian', 'error': 'Only the person who holds the docket may send it on.'}
+    to = db.session.get(User, int(to_user_id)) if str(to_user_id).isdigit() else None
+    if to is None or not to.is_active or to.station_id != d.station_id or to.id == actor.id:
+        return {'ok': False, 'error': 'Choose who the docket is going to.'}
+    if to.role != 'commander' and to.id != d.detective_id:
+        return {'ok': False, 'code': 'recipient',
+                'error': 'A docket goes to the station commander or back to its investigating officer. '
+                         'Giving it to another detective is a reassignment, which the commander makes.'}
+    reason = text(reason)
+    if len(reason) < 10:
+        return {'ok': False, 'error': 'Record why the docket is being sent.'}
+    when = now()
+    send_docket(d, actor.id, to, reason, when,
+                f'{actor.name} has sent you {d.cas_number}. Acknowledge receipt of the docket.')
+    d.last_activity_at = when
+    audit('docket_sent', f'{actor.name} sent {d.cas_number} to {to.name}; acknowledgement required — {reason}', actor,
+          entity_type='docket', entity_id=d.id, case_id=d.id)
+    return {'ok': True, 'to': to.to_dict()}
+
+
+def acknowledge_docket(docket_id, actor, note=''):
+    """The receiver signs for the docket (NI 3/2011 s1.4.10). Only the person
+    it was sent to can, and custody passes to them at that moment."""
+    d = get_docket(docket_id, actor, detective_must_hold=False)
+    m = DocketMovement.query.filter_by(docket_id=d.id, to_user_id=actor.id, acknowledged_at=None) \
+        .order_by(DocketMovement.id.desc()).first()
+    if m is None:
+        return {'ok': False, 'error': 'There is no docket movement waiting for your signature on this case.'}
+    when = now()
+    m.acknowledged_at, m.acknowledgement_note = when, text(note) or None
+    d.last_activity_at = when
+    sender = db.session.get(User, m.from_user_id) if m.from_user_id else None
+    audit('docket_acknowledged',
+          f'{actor.name} acknowledged receipt of {d.cas_number}' + (f' from {sender.name}' if sender else ''), actor,
+          entity_type='docket', entity_id=d.id, case_id=d.id)
+    if sender is not None:
+        tell([sender.id], 'docket', f'{actor.name} has signed for {d.cas_number}.', ROLE_PAGE.get(sender.role))
+    return {'ok': True, 'movement': m.to_dict()}
 
 
 # ----- status -----
@@ -183,6 +285,7 @@ def request_closure(docket_id, actor, payload):
                                   raised_by_complainant=False, raised_at=when, decision_maker_id=actor.id,
                                   status='open'))
     db.session.flush()
+    tell_role(d.station_id, 'commander', 'closure', f'Closure requested on {d.cas_number} — {cat["label"]}.')
     audit('closure_requested', f'Closure requested on {d.cas_number} — {cat["label"]}. Awaiting commander approval.',
           actor, entity_type='docket', entity_id=d.id, case_id=d.id)
     return {'ok': True, 'closure': rec.to_dict()}
@@ -303,6 +406,8 @@ def decide_closure(closure_id, actor, decision, reason):
     else:
         d.last_activity_at = when
     db.session.flush()
+    tell([c.requested_by], 'closure', f'Your closure request on {d.cas_number} was '
+         f'{"approved" if decision == "approved" else "refused"}: {c.decision_reason}', '/dashboard-detective')
     audit('closure_approved' if decision == 'approved' else 'closure_rejected',
           f'Closure of {d.cas_number} {decision} by {actor.name} ({label_role(actor.role)}) on '
           f'{when.isoformat()} — category: {c.category_label}; detective\'s motivation: {c.motivation or "—"}; '
@@ -352,14 +457,21 @@ def note_brought_forward_review(docket_id, actor):
 
 # ----- the investigation diary -----
 
-def add_note(docket_id, actor, note_text):
+def add_note(docket_id, actor, note_text, entry=None):
+    """A diary entry. `entry` may add what kind of entry it is, what came of
+    the action, and what happens next; plain text alone still works."""
     d = get_docket(docket_id, actor)
+    entry = entry or {}
     if not text(note_text):
         return None
+    entry_type = entry.get('entry_type') if entry.get('entry_type') in DIARY_ENTRY_TYPES else 'investigation_note'
     when = now()
-    db.session.add(Note(docket_id=d.id, author_id=actor.id, note_text=text(note_text), created_at=when))
+    db.session.add(Note(docket_id=d.id, author_id=actor.id, note_text=text(note_text), entry_type=entry_type,
+                        outcome=text(entry.get('outcome')) or None, next_action=text(entry.get('next_action')) or None,
+                        created_at=when))
     d.last_activity_at = when
-    audit('update', f'Progress note added to {d.cas_number}', actor, entity_type='note', entity_id=d.id, case_id=d.id)
+    audit('update', f'{DIARY_ENTRY_TYPES[entry_type]} added to the diary of {d.cas_number}', actor,
+          entity_type='note', entity_id=d.id, case_id=d.id)
     return None
 
 
@@ -375,9 +487,52 @@ def add_instruction(docket_id, actor, instruction):
     db.session.add(rec)
     d.last_activity_at = when
     db.session.flush()
+    tell([d.detective_id], 'instruction', f'The station commander wrote an instruction on {d.cas_number}.',
+         '/dashboard-detective')
     audit('instruction', f'Instruction written in the diary of {d.cas_number}: {rec.note_text}', actor,
           entity_type='note', entity_id=rec.id, case_id=d.id)
     return {'ok': True, 'instruction': rec.to_dict()}
+
+
+# ----- the commander's supervisory review -----
+
+def record_review(docket_id, actor, payload):
+    """A periodic inspection on the record: what the commander found, what he
+    directed, and when he looks again. Further directives become a diary
+    instruction, so they block closure until the detective answers them."""
+    d = get_docket(docket_id, actor)
+    outcome = payload.get('outcome')
+    if outcome not in REVIEW_OUTCOMES:
+        return {'ok': False, 'error': 'Choose the outcome of the review.'}
+    notes = text(payload.get('review_notes'))
+    if len(notes) < MIN_REASON_LENGTH:
+        return {'ok': False, 'error': f'Record what you inspected and found — at least {MIN_REASON_LENGTH} characters.'}
+    further = text(payload.get('further_action'))
+    if outcome == 'further_directives' and not further:
+        return {'ok': False, 'error': 'Write the directive the investigating officer must carry out.'}
+    next_review = None
+    if payload.get('next_review_date'):
+        try:
+            next_review = datetime.fromisoformat(str(payload['next_review_date'])[:10]).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return {'ok': False, 'error': 'The next review date is not a valid date.'}
+        if next_review.date() <= now().date():
+            return {'ok': False, 'error': 'The next review date must be in the future.'}
+    when = now()
+    rec = SupervisoryReview(docket_id=d.id, commander_id=actor.id, outcome=outcome, review_notes=notes,
+                            further_action=further or None, next_review_date=next_review, created_at=when)
+    db.session.add(rec)
+    d.last_activity_at = when
+    if outcome == 'further_directives':
+        db.session.add(Note(docket_id=d.id, author_id=actor.id, note_text=further, note_type='instruction',
+                            status='open', response='', created_at=when))
+    db.session.flush()
+    tell([d.detective_id], 'review', f'Supervisory review of {d.cas_number}: {REVIEW_OUTCOMES[outcome]}.',
+         '/dashboard-detective')
+    audit('supervisory_review', f'Supervisory review of {d.cas_number} by {actor.name}: {REVIEW_OUTCOMES[outcome]}'
+          + (f'; next review {next_review.date().isoformat()}' if next_review else ''), actor,
+          entity_type='docket', entity_id=d.id, case_id=d.id)
+    return {'ok': True, 'review': rec.to_dict()}
 
 
 def answer_instruction(note_id, actor, outcome, response):
@@ -629,6 +784,7 @@ def reassign(docket_id, actor, detective_id, reason, detail):
                               assigned_by=actor.id, assigned_at=when, assignment_method='commander_override',
                               is_active=True, reason_category=reason, override_reason=full))
     d.detective_id, d.last_activity_at = det.id, when
+    send_docket(d, actor.id, det, f'Allocated by the station commander — {full}', when)
     intake = db.session.get(Intake, d.intake_id)
     if intake:
         notify(intake, f'The officer investigating {d.cas_number} has changed. {det.name} is now handling it.', when)

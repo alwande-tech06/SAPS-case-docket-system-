@@ -8,12 +8,15 @@ function render() {
   const mine = Store.dockets({ detective_id: me.id });
   const dormantIds = new Set(Store.dormantDockets(me.station_id).map(d => d.id));
   const stale = mine.filter(d => dormantIds.has(d.id));
+  const unsigned = mine.filter(d => Store.awaitingMyReceipt(d.id, me.id));
 
   document.getElementById('tiles').innerHTML = `
     <div class="stat"><div class="n">${mine.filter(d => d.current_status !== 'closed').length}</div>
       <div class="k">Open cases</div></div>
     <div class="stat${stale.length ? ' alert' : ''}"><div class="n">${stale.length}</div>
       <div class="k">No diary entry 30+ days</div></div>
+    <div class="stat${unsigned.length ? ' alert' : ''}"><div class="n">${unsigned.length}</div>
+      <div class="k">Dockets to sign for</div></div>
     <div class="stat good"><div class="n">${mine.filter(d => d.current_status === 'closed').length}</div>
       <div class="k">Closed</div></div>`;
 
@@ -21,7 +24,8 @@ function render() {
     const late = dormantIds.has(d.id);
     const lastDiary = Store.lastDiaryEntry(d.id);
     return `<tr>
-      <td class="ref">${esc(d.cas_number)}</td>
+      <td class="ref">${esc(d.cas_number)}
+        ${Store.awaitingMyReceipt(d.id, me.id) ? '<div><span class="badge badge-alert">Sign for docket</span></div>' : ''}</td>
       <td>${esc(Store.categoryName(d.category_id))}</td>
       <td>${esc(fmtDate(d.registered_at))}</td>
       <td>${late ? `<span class="badge badge-alert">${esc(lastDiary ? ageFrom(lastDiary) + ' ago' : 'no diary entry')}</span>`
@@ -33,6 +37,76 @@ function render() {
 
   document.querySelectorAll('[data-work]').forEach(b => b.onclick = () => detail(Number(b.dataset.work)));
   if (openId) detail(openId);
+}
+
+/* The working file's actions, in the order a docket moves through them, so
+   the screen reads as the road to closure rather than a row of buttons:
+   receive it, investigate, deal with a suspect, finalise. The stage the
+   docket is at is highlighted; the ones behind it are ticked. Every action
+   stays available — an investigation does not always run in a straight line. */
+function workflow(d, arrests) {
+  const awaiting = Store.awaitingMyReceipt(d.id, me.id);
+  const pendingClosure = Store.closures({ docket_id: d.id, status: 'pending_approval' })[0];
+  const closed = d.current_status === 'closed';
+  const notStarted = ['registered', 'awaiting_assignment'].includes(d.current_status);
+  const current = closed ? 5
+    : (awaiting || notStarted) ? 1
+    : (pendingClosure || d.current_status === 'sent_to_prosecutor') ? 4
+    : 2;
+  const tick = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  const step = (n, title, hint, buttons, doneOverride) => {
+    const done = doneOverride !== undefined ? doneOverride : n < current;
+    const state = done ? ' is-done' : (n === current ? ' is-current' : '');
+    return `<li class="flow-step${state}">
+      <div class="flow-head"><span class="flow-num">${done ? tick : n}</span>
+        <span><strong>${title}</strong>${n === current ? '<span class="flow-now">You are here</span>' : ''}</span></div>
+      <p class="small muted">${hint}</p>
+      <div class="btn-row">${buttons}</div>
+    </li>`;
+  };
+
+  return `<ol class="flow" aria-label="Steps to closure">
+    ${step(1, 'Receive the docket',
+      awaiting
+        ? `Allocated to you ${esc(fmtDateTime(awaiting.sent_at))}${awaiting.from_user_id ? ' by ' + esc(Store.userName(awaiting.from_user_id)) : ''}.
+           Sign for it; after 24 hours unsigned it is reported to the commander.`
+        : notStarted ? 'Signed for. Start the investigation to open the diary.'
+        : 'Signed for, and the investigation is under way.',
+      `${awaiting ? '<button class="btn btn-sm btn-primary" id="ackDocket">Acknowledge receipt</button>' : ''}
+       <button class="btn btn-sm${!awaiting && notStarted ? ' btn-primary' : ''}" id="setStatus">${notStarted ? 'Start investigation' : 'Change status'}</button>`)}
+    ${step(2, 'Investigate',
+      'Record every action in the diary, take statements, register exhibits and send them for analysis.',
+      `<button class="btn btn-sm" id="addNote">Add diary entry</button>
+       <button class="btn btn-sm" id="addWitness">Add witness</button>
+       <button class="btn btn-sm" id="addEvidence">Register exhibit</button>
+       <button class="btn btn-sm" id="addForensic">Submit for analysis</button>`)}
+    ${step(3, 'Suspect',
+      arrests.length ? `${arrests.length} arrest(s) recorded on this case.` : 'When a suspect is identified: record the arrest and the charge.',
+      '<button class="btn btn-sm" id="addArrest">Record arrest</button>',
+      closed || arrests.length > 0)}
+    ${step(4, 'Finalise',
+      closed ? `Filed: ${esc(d.closure_type || 'closed')}. It can be reopened on new evidence.`
+        : pendingClosure ? 'Closure requested. The station commander decides; you cannot approve your own request.'
+        : 'Hand the docket to the prosecutor, or ask the commander to file it. Closure needs the commander\'s approval.',
+      closed
+        ? '<button class="btn btn-sm" id="handover" hidden>Hand to prosecutor</button><button class="btn btn-sm" id="reopenCase">Reopen case</button>'
+        : `<button class="btn btn-sm btn-primary" id="handover">Hand to prosecutor</button>
+           <button class="btn btn-sm btn-danger" id="requestClosure">Request closure</button>`,
+      closed)}
+  </ol>`;
+}
+
+/* Where the docket is: with whoever last signed for it, or on its way. */
+function custodyLine(d) {
+  const moving = Store.inTransit(d.id);
+  const holder = Store.custodian(d.id);
+  const canSend = !moving && holder === me.id && d.current_status !== 'closed' &&
+    Store.transferRecipients(d.id, me.id).length;
+  return `<p class="custody small">
+    <span class="muted">Docket held by</span> <strong>${holder ? esc(Store.userName(holder)) : 'nobody yet'}</strong>
+    ${moving ? `<span class="badge badge-alert">On its way to ${esc(Store.userName(moving.to_user_id))} — not signed for</span>` : ''}
+    ${canSend ? '<button class="btn btn-sm" id="sendDocket">Send docket</button>' : ''}</p>`;
 }
 
 function detail(id) {
@@ -59,16 +133,8 @@ function detail(id) {
         </div>
       </div>
 
-      <div class="btn-row" style="margin-bottom:1.2rem">
-        <button class="btn btn-sm" id="addNote">Add progress note</button>
-        <button class="btn btn-sm" id="addEvidence">Register exhibit</button>
-        <button class="btn btn-sm" id="addArrest">Record arrest</button>
-        <button class="btn btn-sm" id="setStatus">Change status</button>
-        <button class="btn btn-sm btn-primary" id="handover">Hand to prosecutor</button>
-        ${d.current_status === 'closed'
-          ? '<button class="btn btn-sm" id="reopenCase">Reopen case</button>'
-          : '<button class="btn btn-sm btn-danger" id="requestClosure">Request closure</button>'}
-      </div>
+      ${custodyLine(d)}
+      ${workflow(d, arrests)}
 
       ${(() => {
         const pending = Store.closures({ docket_id: d.id, status: 'pending_approval' })[0];
@@ -151,8 +217,7 @@ function detail(id) {
             </table>
           </div>
 
-          <h3 style="margin-top:1.4rem">Witnesses and statements
-            <button class="btn btn-sm" id="addWitness" style="float:right">Add witness</button></h3>
+          <h3 style="margin-top:1.4rem">Witnesses and statements</h3>
           <div class="table-scroll">
             <table>
               <thead><tr><th>Witness</th><th>Statement</th><th></th></tr></thead>
@@ -174,8 +239,7 @@ function detail(id) {
             </table>
           </div>
 
-          <h3 style="margin-top:1.4rem">Forensic submissions
-            <button class="btn btn-sm" id="addForensic" style="float:right">Submit for analysis</button></h3>
+          <h3 style="margin-top:1.4rem">Forensic submissions</h3>
           <div class="table-scroll">
             <table>
               <thead><tr><th>Submitted</th><th>Lab reference</th><th>Result</th><th></th></tr></thead>
@@ -224,12 +288,42 @@ function detail(id) {
         </div>
 
         <div>
-          <h3>Progress notes</h3>
+          <h3>Investigation diary</h3>
           <ul class="timeline">
             ${notes.length ? notes.slice().reverse().map(n => `
-              <li><div class="when">${esc(fmtDateTime(n.created_at))} · ${esc(Store.userName(n.author_id))}</div>
-                ${esc(n.note_text)}</li>`).join('')
-              : '<li class="small muted">No notes yet.</li>'}
+              <li><div class="when">${esc(fmtDateTime(n.created_at))} · ${esc(Store.userName(n.author_id))}
+                  <span class="badge badge-neutral">${esc(n.note_type === 'instruction' ? 'Commander instruction'
+                    : Store.diaryEntryLabel(n.entry_type))}</span></div>
+                ${esc(n.note_text)}
+                ${n.outcome ? `<div class="small"><span class="muted">Outcome:</span> ${esc(n.outcome)}</div>` : ''}
+                ${n.next_action ? `<div class="small"><span class="muted">Next:</span> ${esc(n.next_action)}</div>` : ''}
+              </li>`).join('')
+              : '<li class="small muted">No diary entries yet.</li>'}
+          </ul>
+
+          ${(() => {
+            const reviews = Store.reviews(id);
+            return reviews.length ? `<h3 style="margin-top:1.4rem">Supervisory reviews</h3>
+              <ul class="timeline">${reviews.map(r => `
+                <li><div class="when">${esc(fmtDateTime(r.created_at))} · ${esc(Store.userName(r.commander_id))}</div>
+                  <span class="badge ${r.outcome === 'satisfactory' ? 'badge-good' : 'badge-brass'}">${esc(Store.reviewOutcomeLabel(r.outcome))}</span>
+                  <div class="small">${esc(r.review_notes)}</div>
+                  ${r.further_action ? `<div class="small"><span class="muted">Directive:</span> ${esc(r.further_action)}</div>` : ''}
+                  ${r.next_review_date ? `<div class="small muted">Next review ${esc(fmtDate(r.next_review_date))}</div>` : ''}
+                </li>`).join('')}</ul>` : '';
+          })()}
+
+          <h3 style="margin-top:1.4rem">Docket movements</h3>
+          <ul class="timeline">
+            ${Store.movements(id).length ? Store.movements(id).slice().reverse().map(m => `
+              <li><div class="when">${esc(fmtDateTime(m.sent_at))}</div>
+                To ${esc(Store.userName(m.to_user_id))}${m.from_user_id ? ' from ' + esc(Store.userName(m.from_user_id)) : ''}
+                <div class="small muted">${esc(m.reason)}</div>
+                ${m.acknowledged_at
+                  ? `<span class="badge badge-good">Signed for ${esc(fmtDateTime(m.acknowledged_at))}</span>
+                     ${m.acknowledgement_note ? `<div class="small muted">${esc(m.acknowledgement_note)}</div>` : ''}`
+                  : '<span class="badge badge-alert">Not signed for yet</span>'}
+              </li>`).join('') : '<li class="small muted">No movements recorded.</li>'}
           </ul>
 
           <h3 style="margin-top:1.4rem">Status history</h3>
@@ -245,14 +339,41 @@ function detail(id) {
 
   document.getElementById('detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  document.getElementById('addNote').onclick = () => openModal('Add a progress note', `
-    <div class="field"><label for="nt">Note <span class="req">*</span></label>
-      <textarea id="nt" placeholder="What was done, and what is next."></textarea></div>`, async () => {
+  const send = document.getElementById('sendDocket');
+  if (send) send.onclick = () => openSendDocket(d, me, render);
+
+  const ack = document.getElementById('ackDocket');
+  if (ack) ack.onclick = () => openModal('Acknowledge receipt of this docket', `
+    <p class="small">You are signing that the docket ${esc(d.cas_number)} has reached you. From here its
+    investigation is recorded against your name.</p>
+    <div class="field"><label for="ackNote">Note on its condition or contents</label>
+      <input type="text" id="ackNote" placeholder="Optional, e.g. received with 2 statements and 3 photographs"></div>`,
+  async () => {
+    const res = await Store.acknowledgeDocket(id, me, document.getElementById('ackNote').value);
+    if (!res.ok) { toast(res.error, 'alert'); return false; }
+    toast('Receipt of the docket recorded.'); render();
+  }, 'Acknowledge receipt');
+
+  /* A diary entry says what kind of action it was, what came of it and what
+     happens next — which is what the commander reads at a review. */
+  document.getElementById('addNote').onclick = () => openModal('Add an entry to the investigation diary', `
+    <div class="field"><label for="ntType">Kind of entry <span class="req">*</span></label>
+      <select id="ntType">${Store.diaryEntryTypes().map(t =>
+        `<option value="${t.key}">${esc(t.label)}</option>`).join('')}</select></div>
+    <div class="field"><label for="nt">Action taken <span class="req">*</span></label>
+      <textarea id="nt" placeholder="What was done."></textarea></div>
+    <div class="field"><label for="ntOutcome">Outcome</label>
+      <input type="text" id="ntOutcome" placeholder="What came of it"></div>
+    <div class="field"><label for="ntNext">Next action</label>
+      <input type="text" id="ntNext" placeholder="What happens next, and by when"></div>`, async () => {
     const t = document.getElementById('nt').value.trim();
-    if (!t) { toast('Write the note before saving.', 'alert'); return false; }
-    if (await Store.addNote(id, me, t) === false) return false;
-    toast('Progress note added.'); render();
-  });
+    if (!t) { toast('Write what was done before saving.', 'alert'); return false; }
+    const entry = { entry_type: document.getElementById('ntType').value,
+                    outcome: document.getElementById('ntOutcome').value.trim(),
+                    next_action: document.getElementById('ntNext').value.trim() };
+    if (await Store.addNote(id, me, t, entry) === false) return false;
+    toast('Diary entry added.'); render();
+  }, 'Add entry');
 
   document.getElementById('addEvidence').onclick = () => openModal('Register an exhibit', `
     <div class="field"><label for="ed">Description <span class="req">*</span></label>

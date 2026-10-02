@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find a police station - SAPS Case Docket Accountability System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/vendor-leaflet.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>try{if(localStorage.getItem('saps_theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap" style="max-width:980px;margin:0 auto;padding:1.6rem 1rem 3rem">
+  <p class="eyebrow">South African Police Service</p>
+  <h1>Find a police station</h1>
+  <p class="small muted">You can report at any station, whichever one covers the place where it happened.
+    A case opened at the wrong station is transferred for you; you are never sent away to report again.</p>
+
+  <div class="notice notice-alert" style="margin-top:1rem">
+    <strong>Crime in progress, or someone in danger?</strong>
+    Call 10111 now. Crime Stop (anonymous tip-offs): 08600 10111.
+  </div>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="field" style="margin-bottom:.6rem">
+      <label for="area">Suburb or area</label>
+      <input type="text" id="area" placeholder="e.g. Berea, Umlazi, Westville" autocomplete="off">
+      <p class="hint">Type where you are, or where it happened, to see which station covers it.</p>
+    </div>
+    <div id="match"></div>
+    <div id="stationMap" class="map"></div>
+  </div>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="card-head"><h2>Stations</h2></div>
+    <div id="stationList"></div>
+  </div>
+
+  <div class="btn-row" style="margin-top:1.2rem">
+    <a class="btn btn-primary" href="{{ url_for('pages.report') }}">Report a crime online</a>
+    <a class="btn" href="{{ url_for('pages.track') }}">Track a report</a>
+    <a class="btn" href="{{ url_for('pages.index') }}">Home</a>
+  </div>
+</main>
+
+<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script src="{{ url_for('static', filename='js/store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/vendor-leaflet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/maps.js') }}"></script>
+<script>
+renderPublicHeader();
+const stations = Store.stations();
+
+function stationHtml(s) {
+  const placed = s.latitude != null && s.longitude != null;
+  return `<div class="station-card" id="station-${s.id}">
+    <strong>${esc(s.name)}</strong> <span class="ref small muted">${esc(s.code)}</span>
+    <div class="small">${esc(s.address || 'Address not recorded')}${s.phone ? ' · ' + esc(s.phone) : ''}</div>
+    <div class="small muted">Covers: ${esc((s.service_areas || []).join(', ') || '—')}</div>
+    <div class="btn-row" style="margin-top:.5rem">
+      ${placed ? `<button class="btn btn-sm" data-show="${s.id}">Show on map</button>
+        <a class="btn btn-sm" target="_blank" rel="noopener" href="${SapsMap.directionsTo(s.name, s.address)}">Directions</a>` : ''}
+    </div>
+  </div>`;
+}
+document.getElementById('stationList').innerHTML = stations.map(stationHtml).join('');
+
+const map = SapsMap.stations('stationMap', stations, id =>
+  document.getElementById('station-' + id).scrollIntoView({ behavior: 'smooth', block: 'center' }));
+if (!map) document.getElementById('stationMap').hidden = true;
+document.querySelectorAll('[data-show]').forEach(b => b.onclick = () => {
+  if (map) map.focus(Number(b.dataset.show));
+  document.getElementById('stationMap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+/* The same match the server uses to route a report: the station whose list of
+   areas contains the place typed. */
+document.getElementById('area').addEventListener('input', e => {
+  const text = e.target.value.trim().toLowerCase();
+  const box = document.getElementById('match');
+  if (text.length < 3) { box.innerHTML = ''; return; }
+  const hit = stations.find(s => (s.service_areas || []).some(a => a.includes(text) || text.includes(a)));
+  box.innerHTML = hit
+    ? `<div class="notice notice-good"><strong>${esc(hit.name)}</strong>covers that area. ${esc(hit.address || '')}</div>`
+    : `<div class="notice"><strong>No station lists that area</strong>Report at any station, or online: the report
+        is routed for you.</div>`;
+  if (hit && map) map.focus(hit.id);
+});
+</script>
+</body>
+</html>

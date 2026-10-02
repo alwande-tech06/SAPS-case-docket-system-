@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My profile - SAPS Case Docket Accountability System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>try{if(localStorage.getItem('saps_theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
+</head>
+<body>
+<div id="chrome"></div>
+
+<main style="max-width:860px;margin:0 auto;padding:1.6rem 1rem 3rem">
+  <p class="eyebrow">My account</p>
+  <h1 id="pName"></h1>
+  <p class="small muted" id="pSub"></p>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="card-head"><h2>Account details</h2></div>
+    <div class="table-scroll"><table><tbody id="details"></tbody></table></div>
+    <p class="small muted" style="margin:.8rem 0 0">Your name, role, station and personnel number are set by the
+      system administrator. Ask them to correct anything that is wrong.</p>
+  </div>
+
+  <form class="card" id="contactCard" style="margin-top:1.2rem" novalidate>
+    <div class="card-head"><h2>Contact number</h2></div>
+    <div class="field">
+      <label for="phone">Phone number</label>
+      <input type="tel" id="phone" autocomplete="tel" placeholder="e.g. 031 555 0100">
+      <p class="hint">Seen by the system administrator only.</p>
+    </div>
+    <button type="submit" class="btn btn-primary" id="savePhone">Save</button>
+  </form>
+
+  <form class="card" id="passwordCard" style="margin-top:1.2rem" novalidate>
+    <div class="card-head"><h2>Change password</h2></div>
+    <p class="small muted">At least 10 characters, with letters and numbers. Changing it signs this account out
+      on every other device; you stay signed in here.</p>
+    <div class="field">
+      <label for="current">Current password</label>
+      <input type="password" id="current" autocomplete="current-password" required>
+    </div>
+    <div class="field">
+      <label for="next">New password</label>
+      <input type="password" id="next" autocomplete="new-password" required>
+    </div>
+    <div class="field">
+      <label for="next2">New password again</label>
+      <input type="password" id="next2" autocomplete="new-password" required>
+    </div>
+    <button type="submit" class="btn btn-primary" id="savePassword">Change password</button>
+    <div id="passwordResult" role="alert"></div>
+  </form>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="card-head"><h2>Recent notifications</h2></div>
+    <div id="notes"></div>
+  </div>
+</main>
+
+<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script src="{{ url_for('static', filename='js/store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script>
+const s = Store.session();
+if (!s) location.replace('{{ url_for('pages.login') }}');
+else {
+  renderChrome('/profile');
+  const me = Store.myAccount();
+  const spec = Store.specialisations().find(x => x.id === me.specialisation_id);
+  document.getElementById('pName').textContent = me.name;
+  document.getElementById('pSub').textContent = `${labelRole(me.role)} · ${Store.stationName(me.station_id)}`;
+  const row = (k, v) => `<tr><th style="width:38%;text-align:left">${esc(k)}</th><td>${v}</td></tr>`;
+  document.getElementById('details').innerHTML =
+    row('Full name', esc(me.name)) +
+    row('Email (sign-in)', esc(me.email || '—')) +
+    row('Role', esc(labelRole(me.role))) +
+    row('Rank', esc(me.rank || '—')) +
+    row('Personnel number', `<span class="ref">${esc(me.personnel_number || '—')}</span>`) +
+    row('Station', esc(Store.stationName(me.station_id))) +
+    (me.role === 'detective' ? row('Specialisation', esc(spec ? spec.name : '—')) : '') +
+    row('Last sign-in', esc(me.last_login ? fmtDateTime(me.last_login) : '—'));
+  document.getElementById('phone').value = me.phone || '';
+
+  document.getElementById('contactCard').addEventListener('submit', async e => {
+    e.preventDefault();
+    const res = await Store.updateProfile({ phone: document.getElementById('phone').value.trim() });
+    if (!res.ok) { toast(res.error, 'alert'); return; }
+    toast('Contact number saved.');
+  });
+
+  document.getElementById('passwordCard').addEventListener('submit', async e => {
+    e.preventDefault();
+    const box = document.getElementById('passwordResult');
+    const say = (msg, good) => {
+      box.innerHTML = `<div class="notice ${good ? 'notice-good' : 'notice-alert'}" style="margin-top:.9rem">
+        <strong>${good ? 'Password changed' : 'Not changed'}</strong>${esc(msg)}</div>`;
+    };
+    const current = document.getElementById('current').value;
+    const next = document.getElementById('next').value;
+    if (!current || !next) { say('Fill in your current password and the new one.'); return; }
+    if (next !== document.getElementById('next2').value) { say('The two new passwords are not the same.'); return; }
+    const btn = document.getElementById('savePassword');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const res = await Store.changePassword(current, next);
+    btn.disabled = false;
+    if (!res.ok) { say(res.error); return; }
+    ['current', 'next', 'next2'].forEach(id => { document.getElementById(id).value = ''; });
+    say('Use the new password next time you sign in. Other devices have been signed out.', true);
+  });
+
+  const notes = Store.myNotifications();
+  document.getElementById('notes').innerHTML = notes.length
+    ? `<ul class="timeline">${notes.map(n => `<li><div class="when">${esc(fmtDateTime(n.created_at))}</div>
+        ${n.link ? `<a href="${esc(n.link)}">${esc(n.message)}</a>` : esc(n.message)}</li>`).join('')}</ul>`
+    : '<p class="small muted" style="margin:0">Nothing yet.</p>';
+}
+</script>
+</body>
+</html>

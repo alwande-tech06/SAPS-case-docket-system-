@@ -14,8 +14,8 @@ from ..extensions import db
 from ..models import (Arrest, Category, Complainant, ComplainantEvidence, Counter, Docket, Escalation, Intake,
                       Refusal, Station, Transfer, Withdrawal)
 from .common import (DUPLICATE_REASON, INTAKE_REFUSAL_REASONS, MIN_REASON_LENGTH, MISSING_ELEMENTS,
-                     NO_OFFENCE_REASON, ActionError, audit, label_channel, notify, now, store_data_url, text,
-                     user_name)
+                     NO_OFFENCE_REASON, ActionError, audit, label_channel, notify, now, store_data_url, tell_role,
+                     text, user_name)
 from .dockets import create_exhibit, get_docket, open_docket_internal, reopen_docket
 
 SEXUAL_OFFENCE = 3                     # the one category with no typed description
@@ -63,6 +63,19 @@ def route_by_location(location):
     t = str(location or '').lower()
     stations = Station.query.order_by(Station.id).all()
     return next((s for s in stations if any(a in t for a in (s.service_areas or []))), stations[0])
+
+
+def coordinates(lat, lng):
+    """The optional map pin: both numbers, inside South Africa's bounding box, or neither."""
+    if lat in (None, '') or lng in (None, ''):
+        return None, None
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        raise ValidationError('The location on the map is not valid. Place the pin again.')
+    if not (-35.5 <= lat <= -21.5 and 16.0 <= lng <= 33.5):
+        raise ValidationError('The pin on the map is outside South Africa. Place it where the incident happened.')
+    return round(lat, 6), round(lng, 6)
 
 
 def get_intake(intake_id, actor):
@@ -122,6 +135,11 @@ def create_intake(data, actor=None):
     if actor is None and age < 18:
         raise ValidationError('You must be 18 or older to report online.')
     incident_at = parse_datetime(data.get('incident_datetime'))
+    # POPIA: an online report is only taken with the person's agreement to their
+    # information being processed. At the desk the official explains it in person.
+    if actor is None and not data.get('consent'):
+        raise ValidationError('Confirm that you agree to your information being used to investigate this report.')
+    latitude, longitude = coordinates(data.get('latitude'), data.get('longitude'))
 
     if actor is not None:
         channel = data.get('channel') if data.get('channel') in STAFF_CHANNELS else 'assisted'
@@ -160,9 +178,13 @@ def create_intake(data, actor=None):
                     complainant_id=comp.id, category_id=category.id, station_id=station.id, channel=channel,
                     incident_description=description, incident_location=location, incident_datetime=incident_at,
                     created_by=actor.id if actor else None, created_at=when, details=details, suspect=suspect,
-                    witnesses_reported=witnesses, disposition='pending')
+                    witnesses_reported=witnesses, disposition='pending', urgent=bool(data.get('urgent')),
+                    consent_at=when, latitude=latitude, longitude=longitude)
     db.session.add(intake)
     db.session.flush()
+    tell_role(station.id, 'official', 'urgent' if intake.urgent else 'report',
+              f'{"URGENT: " if intake.urgent else ""}New report {intake.intake_number} is waiting for a decision.',
+              exclude=actor.id if actor else None)
     audit('create', f'Report {intake.intake_number} received via {label_channel(channel)}', actor,
           entity_type='intake', entity_id=intake.id)
     audit('route', f'Routed to {station.name} on incident location', actor, entity_type='intake', entity_id=intake.id)
@@ -191,6 +213,43 @@ def open_docket(intake_id, actor, options):
            if assigned else f'A case has been opened. Your case number is {d.cas_number}. An investigating officer is '
                             'being allocated by the station commander.')
     return {'docket': d.to_dict(), 'assigned': assigned.to_dict() if assigned else None}
+
+
+# ----- asking the complainant for more -----
+
+def request_info(intake_id, actor, message):
+    """The official needs more before deciding. The report stays pending (and
+    keeps counting towards the 24-hour line); the complainant sees the question
+    on their tracking page and answers it there."""
+    intake = get_intake(intake_id, actor)
+    if intake.disposition != 'pending':
+        return {'ok': False, 'code': 'intake_preconditions', 'error': 'That report has already been dealt with.'}
+    message = text(message)
+    if len(message) < 10:
+        return {'ok': False, 'error': 'Write what you need the complainant to tell you or send.'}
+    when = now()
+    intake.info_request, intake.info_requested_at, intake.info_requested_by = message, when, actor.id
+    intake.info_response, intake.info_responded_at = None, None
+    notify(intake, f'The station needs more information about your report: {message} '
+                   'Answer from your tracking page.', when)
+    audit('info_requested', f'More information requested from the complainant on {intake.intake_number}', actor,
+          entity_type='intake', entity_id=intake.id)
+    return {'ok': True, 'intake': intake.to_dict()}
+
+
+def respond_info(intake, response):
+    """The complainant's answer, from the tracking page."""
+    if not intake.info_request or intake.info_responded_at:
+        return {'ok': False, 'error': 'There is no open request for information on this report.'}
+    response = text(response)
+    if len(response) < 5:
+        return {'ok': False, 'error': 'Write your answer before sending it.'}
+    intake.info_response, intake.info_responded_at = response, now()
+    tell_role(intake.station_id, 'official', 'report',
+              f'The complainant answered your question on {intake.intake_number}.')
+    audit('info_provided', f'Complainant provided the information requested on {intake.intake_number}',
+          entity_type='intake', entity_id=intake.id)
+    return {'ok': True, 'intake': intake.to_dict()}
 
 
 def refusal_reasons_for(intake):
@@ -246,6 +305,8 @@ def record_refusal(intake_id, actor, payload):
                   status='pending_cosign', raised_at=now(), cosign_note='')
     db.session.add(rec)
     db.session.flush()
+    tell_role(intake.station_id, 'commander', 'cosign',
+              f'A decision not to open a docket on {intake.intake_number} needs your signature.')
     audit('refusal_proposed', f'Refusal proposed on {intake.intake_number} — {ground}. Awaiting a second signature.',
           actor, entity_type='intake', entity_id=intake.id)
     return {'ok': True, 'refusal': rec.to_dict()}
@@ -417,6 +478,8 @@ def request_withdrawal(intake_id, payload):
                      protected_category=elig['protectedCategory'], status='pending')
     db.session.add(rec)
     db.session.flush()
+    tell_role(intake.station_id, 'commander', 'withdrawal',
+              f'The complainant asked to withdraw {intake.intake_number}.')
     audit('withdrawal_request', f'Complainant requested withdrawal of {intake.intake_number} — {rec.reason_category}',
           entity_type='intake', entity_id=intake.id, case_id=intake.docket_id)
     return {'ok': True, 'withdrawal': rec.to_dict()}
@@ -478,6 +541,8 @@ def raise_escalation(intake, payload):
                      decision_maker_id=decision_maker_for(docket_id, intake.id), routed_upward=False, status='open')
     db.session.add(rec)
     db.session.flush()
+    station_id = db.session.get(Docket, docket_id).station_id if docket_id else intake.station_id
+    tell_role(station_id, 'commander', 'escalation', f'A complainant escalated {intake.intake_number}: {rec.reason}')
     audit('escalate', f'Complainant raised escalation: {rec.reason}', entity_type='escalation', entity_id=rec.id,
           case_id=docket_id)
     return rec.to_dict()

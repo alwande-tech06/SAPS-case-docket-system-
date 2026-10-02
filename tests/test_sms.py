@@ -53,7 +53,8 @@ def test_report_code_is_sent_by_sms_and_never_shown(client, bulksms):
     # The code that arrived by SMS is the one that files the report.
     filed = client.post('/api/intakes', json={
         'name': 'Zanele Mokoena', 'contact': '082 555 0199', 'id_number': '9001015009087', 'category_id': 1,
-        'location': 'Berea', 'description': 'Phone taken.', 'incident_datetime': '2026-09-28T08:00:00Z', 'otp': code})
+        'location': 'Berea', 'description': 'Phone taken.', 'incident_datetime': '2026-09-28T08:00:00Z', 'otp': code,
+        'consent': True})
     assert filed.status_code == 201
 
 
@@ -95,7 +96,8 @@ def test_demo_codes_can_go_by_email_to_one_inbox(client, otp_by_email):
     code = body.split('code is ')[1][:6]
     filed = client.post('/api/intakes', json={
         'name': 'Zanele Mokoena', 'contact': '082 555 0199', 'id_number': '9001015009087', 'category_id': 1,
-        'location': 'Berea', 'description': 'Phone taken.', 'incident_datetime': '2026-09-28T08:00:00Z', 'otp': code})
+        'location': 'Berea', 'description': 'Phone taken.', 'incident_datetime': '2026-09-28T08:00:00Z', 'otp': code,
+        'consent': True})
     assert filed.status_code == 201
 
 
@@ -117,7 +119,7 @@ def mailbox(app, monkeypatch):
 
 PERSON = {'name': 'Zanele Mokoena', 'contact': '082 555 0199', 'id_number': '9001015009087'}
 REPORT = dict(PERSON, category_id=1, location='Berea', description='Phone taken.',
-              incident_datetime='2026-09-28T08:00:00Z')
+              incident_datetime='2026-09-28T08:00:00Z', consent=True)
 
 
 def test_a_complainant_can_get_the_code_by_their_own_email(client, mailbox, bulksms):

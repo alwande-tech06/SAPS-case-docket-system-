@@ -53,6 +53,7 @@ _page('/track', 'track', 'track.html')
 _page('/guide', 'guide', 'guide.html')
 _page('/what-happens-next', 'what_happens_next', 'what-happens-next.html')
 _page('/login', 'login', 'login.html')
+_page('/stations', 'stations', 'stations.html')        # station finder, with map
 
 
 @bp.get('/index')
@@ -72,6 +73,7 @@ _page('/commander-withdrawals', 'commander_withdrawals', 'commander-withdrawals.
 _page('/dashboard-admin', 'dashboard_admin', 'dashboard-admin.html', ('admin',))
 _page('/admin-reference', 'admin_reference', 'admin-reference.html', ('admin',))
 _page('/audit', 'audit', 'audit.html', ('commander', 'admin'))
+_page('/profile', 'profile', 'profile.html', ROLES)   # every member of staff: their own account
 
 
 @bp.get('/reset-password')

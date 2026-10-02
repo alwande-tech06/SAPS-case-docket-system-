@@ -228,10 +228,10 @@ const TABLES = ['stations', 'specialisations', 'categories', 'users', 'complaina
   'intakes', 'dockets', 'refusals', 'escalations', 'assignments', 'status_history',
   'notes', 'evidence', 'custody', 'arrests', 'handovers', 'audit_log',
   'complainant_evidence', 'withdrawals', 'notifications', 'closures', 'transfers',
-  'witnesses', 'forensics'];
+  'witnesses', 'forensics', 'docket_movements', 'reviews'];
 
 function emptySnapshot() {
-  const s = { me: null, demo_mode: false, must_change_password: false,
+  const s = { me: null, demo_mode: false, must_change_password: false, my_notifications: [],
               audit_chain: { ok: true, entries: 0 } };
   TABLES.forEach(t => { s[t] = []; });
   return s;
@@ -264,7 +264,8 @@ async function act(name, args, failed) {
   try { res = await api('POST', '/actions/' + name, args); }
   catch (e) { res = { status: 0, data: { ok: false, error: 'The server could not be reached. Check your connection and try again.' } }; }
   if (res.status === 401) {
-    location.replace('/login');
+    /* 'inactive': the account was suspended or deactivated while signed in. */
+    location.replace(res.data && res.data.code === 'inactive' ? '/login?off=1' : '/login');
     return new Promise(() => {});   /* never settles: the page is leaving */
   }
   if (!res.data.ok) {
@@ -338,6 +339,22 @@ const Store = {
     return act('resetUserPassword', { id });
   },
 
+  /* Suspension is temporary and needs a reason; either state can be lifted. */
+  suspendUser(id, actor, reason) { return act('suspendUser', { id, reason }); },
+  reactivateUser(id, actor) { return act('reactivateUser', { id }); },
+
+  /* ----- my own account ----- */
+  myAccount() {
+    const s = read().me;
+    return s ? read().users.find(u => u.id === s.id) || s : null;
+  },
+  updateProfile(payload) { return act('updateProfile', { payload }); },
+
+  /* ----- the bell: things this person should look at ----- */
+  myNotifications() { return read().my_notifications || []; },
+  unreadNotifications() { return Store.myNotifications().filter(n => !n.read_at).length; },
+  markNotificationsRead() { return act('markNotificationsRead', {}); },
+
   users() { return read().users; },
   stations() { return read().stations; },
   categories() { return read().categories; },
@@ -383,6 +400,10 @@ const Store = {
       (!filter.station_id || i.station_id === filter.station_id) &&
       (!filter.disposition || i.disposition === filter.disposition));
   },
+
+  /* ----- asking the complainant for more before deciding ----- */
+  requestInfo(intakeId, actor, message) { return act('requestInfo', { intakeId, message }); },
+  respondInfo(intakeId, response) { return act('respondInfo', { intakeId, response }); },
 
   intakeByNumber(num) {
     const db = read();
@@ -784,8 +805,106 @@ const Store = {
       (!stationId || d.station_id === stationId));
   },
 
-  addNote(docketId, actor, text) {
-    return act('addNote', { docketId, text }, false);
+  /* entry: { entry_type, outcome, next_action } — what kind of diary entry it
+     is, what came of the action and what happens next. Optional. */
+  addNote(docketId, actor, text, entry) {
+    return act('addNote', { docketId, text, entry }, false);
+  },
+
+  diaryEntryTypes() {
+    return [
+      { key: 'investigation_note', label: 'Investigation note' },
+      { key: 'witness_interview', label: 'Witness interview' },
+      { key: 'evidence_catalogued', label: 'Evidence catalogued' },
+      { key: 'court_update', label: 'Court or NPA update' },
+      { key: 'complainant_update', label: 'Complainant updated' }
+    ];
+  },
+  diaryEntryLabel(key) {
+    const t = Store.diaryEntryTypes().find(x => x.key === key);
+    return t ? t.label : 'Investigation note';
+  },
+
+  /* ----- docket movements: who has the docket, and whether they signed for it ----- */
+  movements(docketId) { return read().docket_movements.filter(m => m.docket_id === Number(docketId)); },
+
+  /* The movement this person still has to sign for on this docket, if any. */
+  awaitingMyReceipt(docketId, userId) {
+    return Store.movements(docketId).find(m => m.to_user_id === userId && !m.acknowledged_at) || null;
+  },
+
+  acknowledgeDocket(docketId, actor, note) { return act('acknowledgeDocket', { docketId, note }); },
+
+  /* The movement nobody has signed for yet, if the docket is on its way to someone. */
+  inTransit(docketId) { return Store.movements(docketId).find(m => !m.acknowledged_at) || null; },
+
+  /* Who holds the docket: the last person to sign for it. Sending it does not
+     hand over custody — it stays with the sender until the receiver signs. */
+  custodian(docketId) {
+    const moves = Store.movements(docketId).slice().sort((a, b) => a.id - b.id);
+    const signed = moves.filter(m => m.acknowledged_at && !/^Superseded:/.test(m.acknowledgement_note || ''));
+    if (signed.length) return signed[signed.length - 1].to_user_id;
+    return moves.length ? moves[0].from_user_id : null;
+  },
+
+  /* Who the holder may send it to: the station commander, or back to the
+     officer investigating it. Another detective is a reassignment. */
+  transferRecipients(docketId, userId) {
+    const d = Store.docket(docketId);
+    return read().users.filter(u => u.is_active && u.station_id === d.station_id && u.id !== userId &&
+      (u.role === 'commander' || u.id === d.detective_id));
+  },
+
+  transferDocket(docketId, toUserId, actor, reason) { return act('transferDocket', { docketId, toUserId, reason }); },
+
+  /* Dockets sent to this person and not yet signed for. */
+  docketsAwaiting(userId) {
+    const db = read();
+    return db.docket_movements.filter(m => m.to_user_id === userId && !m.acknowledged_at)
+      .map(m => ({ movement: m, docket: db.dockets.find(d => d.id === m.docket_id) })).filter(x => x.docket);
+  },
+
+  /* Open dockets this person holds. */
+  docketsHeldBy(userId, stationId) {
+    return Store.dockets({ station_id: stationId })
+      .filter(d => d.current_status !== 'closed' && !Store.inTransit(d.id) && Store.custodian(d.id) === userId);
+  },
+
+  /* NI 3/2011 s1.4.10 — allocated to a detective but not signed for in time. */
+  unacknowledgedDockets(stationId, hours = 24) {
+    const db = read();
+    const cut = Date.now() - hours * 36e5;
+    return db.docket_movements.filter(m => !m.acknowledged_at && new Date(m.sent_at).getTime() < cut)
+      .map(m => ({ movement: m, docket: db.dockets.find(d => d.id === m.docket_id) }))
+      .filter(x => x.docket && x.docket.current_status !== 'closed' &&
+        (!stationId || x.docket.station_id === stationId));
+  },
+
+  /* ----- the commander's supervisory review ----- */
+  reviewOutcomes() {
+    return [
+      { key: 'satisfactory', label: 'Investigation satisfactory' },
+      { key: 'further_directives', label: 'Further directives issued' },
+      { key: 'ready_for_court', label: 'Ready for NPA / court referral' },
+      { key: 'closure_recommended', label: 'Docket closure recommended' }
+    ];
+  },
+  reviewOutcomeLabel(key) {
+    const o = Store.reviewOutcomes().find(x => x.key === key);
+    return o ? o.label : key;
+  },
+  reviews(docketId) {
+    return read().reviews.filter(r => r.docket_id === Number(docketId)).slice().reverse();
+  },
+  recordReview(docketId, actor, payload) { return act('recordReview', { docketId, payload }); },
+
+  /* Open dockets whose next review date has arrived. */
+  reviewsDue(stationId) {
+    const db = read();
+    const now = Date.now();
+    return db.dockets.filter(d => d.current_status !== 'closed' && (!stationId || d.station_id === stationId))
+      .map(d => ({ docket: d, last: db.reviews.filter(r => r.docket_id === d.id).slice(-1)[0] }))
+      .filter(x => x.last && x.last.next_review_date && new Date(x.last.next_review_date).getTime() <= now);
   },
 
   notes(docketId) { return read().notes.filter(n => n.docket_id === Number(docketId)); },

@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>try{if(localStorage.getItem('saps_theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 </head>
 <body>
 <div id="chrome"></div>
@@ -40,7 +41,8 @@ if (me) {
       <td>${statusBadge(d.current_status)}</td>
       <td class="actions">
         <button class="btn btn-sm" data-trail="${d.id}">View audit trail</button>
-        ${d.current_status === 'closed' ? '' : `<button class="btn btn-sm btn-primary" data-instruct="${d.id}">Inspect &amp; instruct</button>`}
+        ${d.current_status === 'closed' ? '' : `<button class="btn btn-sm btn-primary" data-instruct="${d.id}">Inspect &amp; instruct</button>
+          <button class="btn btn-sm" data-review="${d.id}">Supervisory review</button>`}
       </td></tr>`;
   }).join('') : emptyRow(8, 'No cases registered yet.');
 
@@ -74,6 +76,9 @@ if (me) {
       location.reload();
     }, 'Write instruction');
   });
+
+  document.querySelectorAll('[data-review]').forEach(b => b.onclick = () =>
+    openReviewModal(Number(b.dataset.review), me, () => location.reload()));
 
   document.querySelectorAll('[data-trail]').forEach(b => b.onclick = () => {
     const d = Store.docket(Number(b.dataset.trail));

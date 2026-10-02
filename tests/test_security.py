@@ -14,6 +14,9 @@ def test_security_headers_and_no_caching_of_pages(client):
     assert r.headers['X-Frame-Options'] == 'DENY'
     assert r.headers['X-Content-Type-Options'] == 'nosniff'
     assert r.headers['Cache-Control'] == 'no-store'
+    # the map tiles need the site's address sent, but never the page or its token
+    assert r.headers['Referrer-Policy'] == 'strict-origin-when-cross-origin'
+    assert 'geolocation=(self)' in r.headers['Permissions-Policy']
     assert 'no-store' not in client.get('/static/css/style.css').headers.get('Cache-Control', '')
 
 

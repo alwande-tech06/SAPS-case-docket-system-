@@ -17,14 +17,29 @@ from .services.intakes import TOKEN_ALPHABET
 
 DEMO_PASSWORD = 'demo1234'
 
+# Addresses and map positions are where OpenStreetMap places each police
+# station (looked up October 2026). Check them against SAPS's own list before
+# going live.
 STATIONS = [
     dict(id=1, name='Durban Central SAPS', code='DBN', province='KwaZulu-Natal',
          service_areas=['durban central', 'smith street', 'glenwood', 'berea', 'overport', 'morningside', 'umbilo',
-                        'point', 'city centre', 'anton lembede']),
-    dict(id=2, name='Umlazi SAPS', code='UML', province='KwaZulu-Natal', service_areas=['umlazi']),
+                        'point', 'city centre', 'anton lembede'],
+         address='282 Stalwart Simelane Street, Durban Central', latitude=-29.842494, longitude=31.028666),
+    dict(id=2, name='Umlazi SAPS', code='UML', province='KwaZulu-Natal', service_areas=['umlazi'],
+         # no building on the map for this one: the position is Ithala Road, beside the centre
+         address='Ithala Centre, Umlazi W, Umlazi, 3610', latitude=-29.970191, longitude=30.892446),
     dict(id=3, name='Pinetown SAPS', code='PTN', province='KwaZulu-Natal',
-         service_areas=['pinetown', 'westville', 'kloof', 'new germany']),
+         service_areas=['pinetown', 'westville', 'kloof', 'new germany'],
+         address='Josiah Gumede Road, Pinetown', latitude=-29.818517, longitude=30.872355),
 ]
+
+# The positions this system shipped with before. A station still showing one
+# of these was never edited by anyone, so it is safe to correct.
+FIRST_POSITIONS = {
+    1: [('Stalwart Simelane Street, Durban Central', -29.8523, 31.0257)],
+    2: [('Mangosuthu Highway, Umlazi', -29.9690, 30.8840), ('Nyamazane Drive, Umlazi', -29.962629, 30.928150)],
+    3: [('Kings Road, Pinetown', -29.8149, 30.8608)],
+}
 
 SPECIALISATIONS = [
     dict(id=1, name='General Detective'),
@@ -95,11 +110,23 @@ REPORTS = [
 
 
 def load_reference():
-    """Stations, specialisations and crime categories — needed by every deployment."""
+    """Stations, specialisations and crime categories — needed by every deployment.
+    Adds what is missing; on a station that already exists it only fills in an
+    address or map position that is still empty, or corrects the rough position
+    it first shipped with — never overwriting an edit."""
     for rows, model in ((STATIONS, Station), (SPECIALISATIONS, Specialisation), (CATEGORIES, Category)):
         for row in rows:
-            if db.session.get(model, row['id']) is None:
+            existing = db.session.get(model, row['id'])
+            if existing is None:
                 db.session.add(model(**row))
+            elif model is Station:
+                untouched = existing.latitude is not None and existing.longitude is not None and any(
+                    existing.address == address and abs(existing.latitude - lat) < 1e-6
+                    and abs(existing.longitude - lng) < 1e-6
+                    for address, lat, lng in FIRST_POSITIONS.get(existing.id, []))
+                for field in ('address', 'phone', 'latitude', 'longitude'):
+                    if (untouched or getattr(existing, field) is None) and row.get(field) is not None:
+                        setattr(existing, field, row[field])
     db.session.flush()
 
 
@@ -124,7 +151,8 @@ def reset_and_seed():
     wipe()
     load_reference()
     for u in USERS:
-        user = User(**u, is_active=True, must_change_password=False)
+        user = User(**u, is_active=True, must_change_password=False, account_status='active',
+                    personnel_number=f'{7010000 + u["id"]}')
         user.set_password(DEMO_PASSWORD)
         db.session.add(user)
     db.session.flush()
@@ -233,6 +261,13 @@ def reset_and_seed():
         db.session.flush()
         audit('escalate', f'System raised escalation: {overdue.intake_number} undisposed for more than 24 hours',
               entity_type='escalation', entity_id=e.id, performed_at=hours(30))
+
+    # The seeded cases are history: their dockets were signed for when they were
+    # allocated, and nobody's bell should ring for them.
+    from .models import DocketMovement, StaffNotification
+    for m in DocketMovement.query.filter_by(acknowledged_at=None):
+        m.acknowledged_at = m.sent_at
+    StaffNotification.query.delete()
 
     audit('seed', 'Demonstration data loaded')
     db.session.commit()

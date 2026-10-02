@@ -121,3 +121,16 @@ def test_deployment_files_agree():
     build = (root / 'build.sh').read_text()
     assert 'flask db upgrade' in build and 'flask bootstrap' in build and 'flask seed' not in build
     assert keys['PYTHON_VERSION']['value'] == (root / '.python-version').read_text().strip()
+
+
+def test_reference_load_corrects_first_station_positions_but_not_edits(app):
+    from app.extensions import db
+    from app.models import Station
+    from app.seed import FIRST_POSITIONS, STATIONS, load_reference
+    dbn, uml = db.session.get(Station, 1), db.session.get(Station, 2)
+    dbn.address, dbn.latitude, dbn.longitude = FIRST_POSITIONS[1][0]        # as first deployed
+    uml.address, uml.latitude, uml.longitude = 'Edited by the administrator', -29.95, 30.9
+    db.session.flush()
+    load_reference()
+    assert (dbn.address, dbn.latitude) == (STATIONS[0]['address'], STATIONS[0]['latitude'])
+    assert uml.address == 'Edited by the administrator' and uml.latitude == -29.95

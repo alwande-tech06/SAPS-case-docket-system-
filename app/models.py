@@ -61,6 +61,10 @@ class Station(Record, db.Model):
     code = db.Column(db.String(10), nullable=False, unique=True)
     province = db.Column(db.String(60), nullable=False)
     service_areas = db.Column(db.JSON, nullable=False, default=list)
+    address = db.Column(db.String(255))
+    phone = db.Column(db.String(20))
+    latitude = db.Column(db.Float)
+    longitude = db.Column(db.Float)
 
 
 class Specialisation(Record, db.Model):
@@ -96,6 +100,11 @@ class User(Record, db.Model):
     availability = db.Column(db.String(20), nullable=False, default='available')
     max_caseload = db.Column(db.Integer, nullable=False, default=0)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    personnel_number = db.Column(db.String(30), unique=True)
+    phone = db.Column(db.String(20))
+    # active | suspended (temporary, can be lifted) | deactivated (left the service)
+    account_status = db.Column(db.String(20), nullable=False, default='active', server_default='active')
+    status_reason = db.Column(db.Text)
     must_change_password = db.Column(db.Boolean, nullable=False, default=False)
     # Goes up with every new password; a sign-in made before that stops working,
     # so changing or resetting a password signs the account out everywhere else.
@@ -174,6 +183,17 @@ class Intake(Record, db.Model):
     disposed_at = ts()
     disposed_by = fk('users.id')
     docket_id = db.Column(db.Integer)   # set once a docket exists; dockets point back with a real FK
+    # Asked of the complainant: does this need urgent attention at the station?
+    urgent = db.Column(db.Boolean, nullable=False, default=False, server_default='false')
+    consent_at = ts()                   # when they agreed to their information being processed (POPIA)
+    latitude = db.Column(db.Float)      # the pin dropped on the map, if any
+    longitude = db.Column(db.Float)
+    # An official asking for more before deciding; the report stays pending.
+    info_request = db.Column(db.Text)
+    info_requested_at = ts()
+    info_requested_by = fk('users.id')
+    info_response = db.Column(db.Text)
+    info_responded_at = ts()
 
     complainant = db.relationship(Complainant)
 
@@ -267,11 +287,53 @@ class Note(Record, db.Model):
     author_id = fk('users.id')
     note_text = db.Column(db.Text, nullable=False)
     note_type = db.Column(db.String(20))
+    entry_type = db.Column(db.String(30))     # investigation_note, witness_interview, ...
+    outcome = db.Column(db.Text)
+    next_action = db.Column(db.Text)
     status = db.Column(db.String(20))
     response = db.Column(db.Text)
     responded_by = fk('users.id')
     responded_at = ts()
     created_at = ts(nullable=False)
+
+
+class DocketMovement(Record, db.Model):
+    """A docket changing hands. The receiver signs for it; until they do it
+    shows as in transit, and after 24 hours as overdue (NI 3/2011 s1.4.10)."""
+    __tablename__ = 'docket_movements'
+    id = db.Column(db.Integer, primary_key=True)
+    docket_id = fk('dockets.id', nullable=False, index=True)
+    from_user_id = fk('users.id')
+    to_user_id = fk('users.id', nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=False, default='')
+    sent_at = ts(nullable=False)
+    acknowledged_at = ts()
+    acknowledgement_note = db.Column(db.Text)
+
+
+class SupervisoryReview(Record, db.Model):
+    """The station commander's periodic inspection of a docket."""
+    __tablename__ = 'reviews'
+    id = db.Column(db.Integer, primary_key=True)
+    docket_id = fk('dockets.id', nullable=False, index=True)
+    commander_id = fk('users.id', nullable=False)
+    outcome = db.Column(db.String(40), nullable=False)
+    review_notes = db.Column(db.Text, nullable=False)
+    further_action = db.Column(db.Text)
+    next_review_date = ts()
+    created_at = ts(nullable=False)
+
+
+class StaffNotification(Record, db.Model):
+    """Something a member of staff should look at: the bell in the page header."""
+    __tablename__ = 'staff_notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = fk('users.id', nullable=False, index=True)
+    kind = db.Column(db.String(30), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    link = db.Column(db.String(120))
+    created_at = ts(nullable=False, default=utcnow)
+    read_at = ts()
 
 
 class Witness(Record, db.Model):

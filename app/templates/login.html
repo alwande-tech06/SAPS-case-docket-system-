@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script>try{if(localStorage.getItem('saps_theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 </head>
 <body>
 <div id="chrome"></div>
@@ -234,6 +235,13 @@ if (resetData) resetData.onclick = async () => {
   await Store.reset();
   location.reload();
 };
+
+/* Sent here because the account was switched off while they were signed in. */
+if (new URLSearchParams(location.search).get('off')) {
+  document.getElementById('signInNotice').innerHTML = `
+    <div class="notice notice-alert" style="margin-bottom:1rem"><strong>You have been signed out</strong>
+      This account has been suspended or deactivated. Speak to your system administrator.</div>`;
+}
 </script>
 </body>
 </html>
