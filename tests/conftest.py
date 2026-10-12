@@ -45,3 +45,8 @@ def as_role(client):
         login(client, email)
         return client
     return sign_in
+
+
+def start_investigation(client, docket_id):
+    """Step 1 of a docket: the investigation is started before anything is recorded on it."""
+    return act(client, 'updateStatus', docketId=docket_id, newStatus='under_investigation', notes='Investigation started.')

@@ -551,7 +551,7 @@
   <h2>Dashboard helper snippet</h2>
   <p>Add this next to any disabled button so the user can see which rule is blocking it.</p>
   <pre>&lt;button disabled&gt;Request closure&lt;/button&gt;
-&lt;a class="why" href="{{ url_for('pages.guide') }}?role=detective#rule-closure-diary" target="_blank"&gt;
+&lt;a class="why" href="{{ url_for('pages.guide') }}?role=detective#rule-closure-diary"&gt;
   Why is this blocked?
 &lt;/a&gt;</pre>
   <p>In this system the dashboards do not hard-code that anchor. The data layer returns a

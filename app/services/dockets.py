@@ -47,6 +47,38 @@ def get_docket(docket_id, actor, detective_must_hold=True):
     return d
 
 
+# ----- the order of an investigation -----
+# A docket is worked in order: it is signed for and the investigation started,
+# then investigated, and only then can a suspect be arrested or the docket
+# finalised. The screen shows the same order; this is what enforces it.
+
+def investigation_recorded(d):
+    """Has anything been done on this docket — a diary entry, a witness, an
+    exhibit or a forensic submission? (A commander's instruction is not.)"""
+    return bool(
+        Note.query.filter(Note.docket_id == d.id, db.or_(Note.note_type.is_(None), Note.note_type != 'instruction')).count()
+        or Witness.query.filter_by(docket_id=d.id).count()
+        or Evidence.query.filter_by(docket_id=d.id).count()
+        or Forensic.query.filter_by(docket_id=d.id).count())
+
+
+def require_stage(d, actor, stage):
+    """Stops a detective taking a step before the one it depends on.
+    stage: 'investigate' (diary, witnesses, exhibits, forensics),
+           'suspect' (an arrest) or 'finalise' (prosecutor, closure)."""
+    if actor is None or actor.role != 'detective':
+        return
+    if DocketMovement.query.filter_by(docket_id=d.id, to_user_id=actor.id, acknowledged_at=None).count():
+        raise ActionError('Acknowledge receipt of this docket first.', 409)
+    if d.current_status in ('registered', 'awaiting_assignment'):
+        raise ActionError('Start the investigation first (step 1).', 409)
+    if stage in ('suspect', 'finalise') and not investigation_recorded(d):
+        raise ActionError(
+            'Nothing has been recorded on this investigation yet. Add a diary entry, a witness, an exhibit or a '
+            'forensic submission before ' + ('recording an arrest.' if stage == 'suspect' else 'finalising the docket.'),
+            409)
+
+
 def _open_instructions(d):
     return Note.query.filter_by(docket_id=d.id, note_type='instruction', status='open').all()
 
@@ -258,6 +290,8 @@ def closure_blocker(d, category_key, payload):
 
 def request_closure(docket_id, actor, payload):
     d = get_docket(docket_id, actor)
+    # (No require_stage here: closure_blocker below already refuses a docket
+    # with nothing recorded, and says which rule it failed.)
     cat = next((c for c in FILING_CATEGORIES if c['key'] == payload.get('category')), None)
     if not cat:
         return {'ok': False, 'code': 'filing_categories', 'error': 'Choose a filing category.'}
@@ -461,6 +495,7 @@ def add_note(docket_id, actor, note_text, entry=None):
     """A diary entry. `entry` may add what kind of entry it is, what came of
     the action, and what happens next; plain text alone still works."""
     d = get_docket(docket_id, actor)
+    require_stage(d, actor, 'investigate')
     entry = entry or {}
     if not text(note_text):
         return None
@@ -558,10 +593,17 @@ def answer_instruction(note_id, actor, outcome, response):
 
 def add_witness(docket_id, actor, payload):
     d = get_docket(docket_id, actor)
+    require_stage(d, actor, 'investigate')
     if not text(payload.get('name')):
         return {'ok': False, 'error': "The witness's name is required."}
     when = now()
+    try:
+        photo = store_data_url(payload['photo_data_url'], 'witness-evidence', actor) \
+            if payload.get('photo_data_url') else None
+    except ValueError as e:
+        return {'ok': False, 'error': str(e)}
     rec = Witness(docket_id=d.id, name=text(payload.get('name')), contact=text(payload.get('contact')),
+                  description=text(payload.get('description')), photo_url=photo,
                   identified_by=actor.id, identified_at=when)
     db.session.add(rec)
     d.last_activity_at = when
@@ -595,6 +637,7 @@ def record_witness_statement(witness_id, actor, statement_text, no_statement_rea
 
 def submit_forensic(docket_id, actor, payload):
     d = get_docket(docket_id, actor)
+    require_stage(d, actor, 'investigate')
     if not text(payload.get('description')):
         return {'ok': False, 'error': 'Describe what was submitted.'}
     if not text(payload.get('lab_reference')):
@@ -660,6 +703,7 @@ def create_exhibit(d, actor, payload, when=None):
 
 def add_evidence(docket_id, actor, payload):
     d = get_docket(docket_id, actor)
+    require_stage(d, actor, 'investigate')
     if not text(payload.get('description')):
         return {'ok': False, 'code': 'exhibit', 'error': 'Describe the exhibit before it can be recorded.'}
     if not payload.get('image_data_url'):
@@ -720,6 +764,7 @@ def transfer_evidence(evidence_id, actor, to_user_id, purpose):
 
 def add_arrest(docket_id, actor, payload):
     d = get_docket(docket_id, actor)
+    require_stage(d, actor, 'suspect')
     if not text(payload.get('accused_name')):
         return None
     when = now()
@@ -733,6 +778,7 @@ def add_arrest(docket_id, actor, payload):
 
 def handover(docket_id, actor, payload):
     d = get_docket(docket_id, actor)
+    require_stage(d, actor, 'finalise')
     if not text(payload.get('recipient_name')) or not text(payload.get('recipient_organisation')):
         return None
     when = now()

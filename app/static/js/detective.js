@@ -49,51 +49,68 @@ function workflow(d, arrests) {
   const pendingClosure = Store.closures({ docket_id: d.id, status: 'pending_approval' })[0];
   const closed = d.current_status === 'closed';
   const notStarted = ['registered', 'awaiting_assignment'].includes(d.current_status);
-  const current = closed ? 5
-    : (awaiting || notStarted) ? 1
-    : (pendingClosure || d.current_status === 'sent_to_prosecutor') ? 4
-    : 2;
+  const sent = d.current_status === 'sent_to_prosecutor';
+
+  /* Each step opens only when the one before it is done (the server holds
+     the same order): receive and start, then investigate, then a suspect or
+     finalising. There is not always a suspect, so step 4 opens with step 3. */
+  const received = closed || (!awaiting && !notStarted);
+  const investigated = closed || Store.investigationRecorded(d.id);
+  const open = { 1: true, 2: received, 3: received && investigated, 4: received && investigated };
+  const done = { 1: received, 2: received && investigated, 3: closed || arrests.length > 0, 4: closed };
+  const current = closed ? 0 : !received ? 1 : !investigated ? 2
+    : (pendingClosure || sent || arrests.length) ? 4 : 3;
+
   const tick = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" ' +
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-  const step = (n, title, hint, buttons, doneOverride) => {
-    const done = doneOverride !== undefined ? doneOverride : n < current;
-    const state = done ? ' is-done' : (n === current ? ' is-current' : '');
+  const lock = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/>' +
+    '<path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+  const off = n => (open[n] ? '' : ' disabled');
+  const step = (n, title, hint, buttons, lockedBy) => {
+    const state = !open[n] ? ' is-locked' : done[n] ? ' is-done' : n === current ? ' is-current' : '';
     return `<li class="flow-step${state}">
-      <div class="flow-head"><span class="flow-num">${done ? tick : n}</span>
-        <span><strong>${title}</strong>${n === current ? '<span class="flow-now">You are here</span>' : ''}</span></div>
-      <p class="small muted">${hint}</p>
+      <div class="flow-head"><span class="flow-num">${!open[n] ? lock : done[n] ? tick : n}</span>
+        <span><strong>${title}</strong>${open[n] && n === current ? '<span class="flow-now">You are here</span>' : ''}</span></div>
+      <p class="small muted">${open[n] ? hint : lockedBy}</p>
       <div class="btn-row">${buttons}</div>
     </li>`;
   };
 
-  return `<ol class="flow" aria-label="Steps to closure">
+  return `<ol class="flow" aria-label="Steps to closure, in order">
     ${step(1, 'Receive the docket',
       awaiting
         ? `Allocated to you ${esc(fmtDateTime(awaiting.sent_at))}${awaiting.from_user_id ? ' by ' + esc(Store.userName(awaiting.from_user_id)) : ''}.
            Sign for it; after 24 hours unsigned it is reported to the commander.`
-        : notStarted ? 'Signed for. Start the investigation to open the diary.'
+        : notStarted ? 'Signed for. Start the investigation to open the next step.'
         : 'Signed for, and the investigation is under way.',
       `${awaiting ? '<button class="btn btn-sm btn-primary" id="ackDocket">Acknowledge receipt</button>' : ''}
-       <button class="btn btn-sm${!awaiting && notStarted ? ' btn-primary' : ''}" id="setStatus">${notStarted ? 'Start investigation' : 'Change status'}</button>`)}
+       <button class="btn btn-sm${!awaiting && notStarted ? ' btn-primary' : ''}" id="setStatus"${awaiting ? ' disabled' : ''}>${
+         notStarted ? 'Start investigation' : 'Change status'}</button>`)}
     ${step(2, 'Investigate',
-      'Record every action in the diary, take statements, register exhibits and send them for analysis.',
-      `<button class="btn btn-sm" id="addNote">Add diary entry</button>
-       <button class="btn btn-sm" id="addWitness">Add witness</button>
-       <button class="btn btn-sm" id="addEvidence">Register exhibit</button>
-       <button class="btn btn-sm" id="addForensic">Submit for analysis</button>`)}
+      investigated ? 'Investigation recorded. Keep adding to it as the case develops.'
+        : 'Record at least one action — a diary entry, a witness, an exhibit or a forensic submission — to open the next steps.',
+      `<button class="btn btn-sm${current === 2 ? ' btn-primary' : ''}" id="addNote"${off(2)}>Add diary entry</button>
+       <button class="btn btn-sm" id="addWitness"${off(2)}>Add witness</button>
+       <button class="btn btn-sm" id="addEvidence"${off(2)}>Register exhibit</button>
+       <button class="btn btn-sm" id="addForensic"${off(2)}>Submit for analysis</button>`,
+      'Opens once you have signed for the docket and started the investigation.')}
     ${step(3, 'Suspect',
-      arrests.length ? `${arrests.length} arrest(s) recorded on this case.` : 'When a suspect is identified: record the arrest and the charge.',
-      '<button class="btn btn-sm" id="addArrest">Record arrest</button>',
-      closed || arrests.length > 0)}
+      arrests.length ? `${arrests.length} arrest(s) recorded on this case.`
+        : 'If the investigation identifies a suspect, record the arrest and the charge. No suspect? Go on to step 4.',
+      `<button class="btn btn-sm" id="addArrest"${off(3)}>Record arrest</button>`,
+      'Opens once the investigation has something recorded. An arrest follows from an investigation, not before it.')}
     ${step(4, 'Finalise',
       closed ? `Filed: ${esc(d.closure_type || 'closed')}. It can be reopened on new evidence.`
         : pendingClosure ? 'Closure requested. The station commander decides; you cannot approve your own request.'
+        : sent ? 'With the prosecutor. Ask the commander to file it when the matter is finished.'
         : 'Hand the docket to the prosecutor, or ask the commander to file it. Closure needs the commander\'s approval.',
       closed
         ? '<button class="btn btn-sm" id="handover" hidden>Hand to prosecutor</button><button class="btn btn-sm" id="reopenCase">Reopen case</button>'
-        : `<button class="btn btn-sm btn-primary" id="handover">Hand to prosecutor</button>
-           <button class="btn btn-sm btn-danger" id="requestClosure">Request closure</button>`,
-      closed)}
+        : `<button class="btn btn-sm btn-primary" id="handover"${off(4) || (pendingClosure ? ' disabled' : '')}>Hand to prosecutor</button>
+           <button class="btn btn-sm btn-danger" id="requestClosure"${off(4) || (pendingClosure ? ' disabled' : '')}>${
+             pendingClosure ? 'Closure requested' : 'Request closure'}</button>`,
+      'Opens once the investigation has something recorded.')}
   </ol>`;
 }
 
@@ -225,7 +242,9 @@ function detail(id) {
                 ${(() => {
                   const ws = Store.witnesses(d.id);
                   return ws.length ? ws.map(w => `<tr>
-                    <td>${esc(w.name)}<div class="small muted">${esc(w.contact || '—')}</div></td>
+                    <td>${esc(w.name)}<div class="small muted">${esc(w.contact || '—')}</div>
+                      ${w.description ? `<div class="small">${esc(w.description)}</div>` : ''}
+                      ${w.photo_url ? `<img class="exhibit-thumb attachment-preview witness-photo" src="${w.photo_url}" alt="Evidence from ${esc(w.name)}" title="Photo of evidence — click to enlarge">` : ''}</td>
                     <td>${w.statement_text
                       ? `<span class="badge badge-good">Taken</span><div class="small muted">${esc(w.statement_text.slice(0, 90))}</div>`
                       : w.no_statement_reason
@@ -570,9 +589,22 @@ function detail(id) {
     <div class="field"><label for="wn">Name <span class="req">*</span></label>
       <input type="text" id="wn" placeholder="Name and surname"></div>
     <div class="field"><label for="wc">Contact</label>
-      <input type="text" id="wc" placeholder="Phone number, if known"></div>`, async () => {
+      <input type="text" id="wc" placeholder="Phone number, if known"></div>
+    <div class="field"><label for="wd">Description <span class="small muted">(optional)</span></label>
+      <textarea id="wd" style="min-height:70px" placeholder="What this witness saw, or what they can speak to"></textarea></div>
+    <div class="field"><label for="wimg">Photo of evidence <span class="small muted">(optional)</span></label>
+      <input type="file" id="wimg" accept="image/*">
+      <p class="hint">A photograph of anything the witness points to. Up to 2 MB.</p></div>`, async () => {
+    let photo = null;
+    const picked = document.getElementById('wimg').files;
+    if (picked.length) {
+      const converted = await filesToAttachments(picked, { maxFiles: 1 });
+      if (!converted.ok) { toast(converted.error, 'alert'); return false; }
+      photo = converted.attachments[0].dataUrl;
+    }
     const res = await Store.addWitness(id, me, { name: document.getElementById('wn').value,
-      contact: document.getElementById('wc').value });
+      contact: document.getElementById('wc').value, description: document.getElementById('wd').value,
+      photo_data_url: photo });
     if (!res.ok) { toast(res.error, 'alert'); return false; }
     toast('Witness recorded.'); render();
   }, 'Add witness');

@@ -194,9 +194,69 @@ function ruleHref(code) {
 function whyBlocked(code, label) {
   const href = ruleHref(code);
   if (!href) return '';
-  return `<a class="why" href="${href}" target="_blank" rel="noopener">${
-    esc(label || 'Why is this blocked?')}</a>`;
+  return `<a class="why" href="${href}">${esc(label || 'Why is this blocked?')}</a>`;
 }
+
+/* A rule link shows the rule here, over the page, instead of leaving it: the
+   person is usually half-way through a decision, and a new tab or a page
+   change would take them away from it. The rule's text is read from the guide
+   itself, so there is one copy of every rule. If it cannot be fetched, the
+   link simply works as a link. */
+let guidePage = null;
+async function showRule(href) {
+  const url = new URL(href, location.href);
+  const id = url.hash.slice(1);
+  if (!guidePage) {
+    guidePage = fetch(url.pathname, { credentials: 'same-origin' })
+      .then(r => { if (!r.ok) throw new Error('guide'); return r.text(); })
+      .then(html => new DOMParser().parseFromString(html, 'text/html'));
+    guidePage.catch(() => { guidePage = null; });
+  }
+  const rule = (await guidePage).getElementById(id);
+  if (!rule) throw new Error('rule');
+  const section = rule.closest('section');
+  const heading = section && section.querySelector('h2');
+
+  let back = document.querySelector('.rule-back');
+  if (!back) {
+    back = document.createElement('div');
+    back.className = 'rule-back';
+    back.innerHTML = '<div class="rule-pop" role="dialog" aria-modal="true" aria-label="What this rule requires"></div>';
+    document.body.appendChild(back);
+    back.addEventListener('click', e => { if (e.target === back) closeRule(); });
+  }
+  const copy = rule.cloneNode(true);
+  copy.removeAttribute('id');
+  const pop = back.querySelector('.rule-pop');
+  pop.innerHTML = `
+    <p class="eyebrow" style="margin:0 0 .5rem">${esc(heading ? heading.textContent : 'Regulations')}</p>
+    <div id="ruleBody"></div>
+    <div class="btn-row" style="margin-top:1rem">
+      <button class="btn btn-primary" id="ruleClose">Back to what I was doing</button>
+      <a class="btn-link" href="${esc(url.pathname + url.search + url.hash)}">Open the full guide</a>
+    </div>`;
+  pop.querySelector('#ruleBody').appendChild(copy);
+  back.classList.add('open');
+  pop.querySelector('#ruleClose').onclick = closeRule;
+  pop.querySelector('#ruleClose').focus();
+}
+
+function closeRule() {
+  const back = document.querySelector('.rule-back');
+  if (back) back.classList.remove('open');
+}
+
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a.why');
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+  e.preventDefault();
+  showRule(a.href).catch(() => { location.href = a.href; });
+});
+/* Escape closes the rule first, and leaves the form underneath it open. */
+document.addEventListener('keydown', e => {
+  const back = document.querySelector('.rule-back.open');
+  if (e.key === 'Escape' && back) { e.stopImmediatePropagation(); closeRule(); }
+}, true);
 
 /* ---------------- role guard ---------------- */
 
@@ -260,7 +320,7 @@ function renderChrome(activeHref) {
      check what a rule requires. Admin has no Help item: it is a technical role
      with no case duties, so the guide has nothing to tell it. */
   (GUIDE_ROLES.includes(s.role)
-    ? `<a class="tab tab-help" href="/guide?role=${esc(s.role)}" target="_blank" rel="noopener">Help</a>`
+    ? `<a class="tab tab-help" href="/guide?role=${esc(s.role)}">Help</a>`
     : '');
 
   host.innerHTML = `
@@ -334,7 +394,8 @@ function wireBell() {
    choices belong. Once they are reporting or tracking, the screen is the form
    and nothing else — a half-filled report is easy to lose to a stray tap on a
    navigation button, and the pages already carry their own way back. */
-function renderPublicHeader() {
+/* opts.home: a page with no other way back shows a Home button beside the theme button. */
+function renderPublicHeader(opts = {}) {
   const host = document.getElementById('chrome');
   if (!host) return;
   const page = location.pathname.split('/').pop();
@@ -353,6 +414,7 @@ function renderPublicHeader() {
           <a class="btn btn-sm" href="/">Home</a>
           <a class="btn btn-sm" href="/stations">Find a station</a>
           <a class="btn btn-sm" href="/login">Staff sign in</a>` : ''}
+        ${opts.home && !isLanding ? '<a class="btn btn-sm" href="/">Home</a>' : ''}
         ${themeButton()}
       </div>
     </header>`;

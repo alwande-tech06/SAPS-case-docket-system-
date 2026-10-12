@@ -5,7 +5,7 @@ from app.extensions import db
 from app.models import (AuditLog, Closure, Custody, Docket, Escalation, Evidence, Intake, Notification, Refusal,
                         Station, User, Withdrawal)
 
-from .conftest import act
+from .conftest import act, start_investigation
 
 PNG = 'data:image/png;base64,' + base64.b64encode(b'\x89PNG\r\n\x1a\n' + b'0' * 64).decode()
 
@@ -160,6 +160,7 @@ def test_status_cannot_be_set_to_closed(client, as_role):
 def test_witnesses_forensics_arrest_and_handover(client, as_role):
     theft = docket_of('INT-2026-DBN-000001')
     as_role('detective')
+    start_investigation(client, theft.id)
     w = act(client, 'addWitness', docketId=theft.id, payload={'name': 'Mr Naidoo', 'contact': '082 555 0000'})[1]['witness']
     assert act(client, 'recordWitnessStatement', witnessId=w['id'], statementText='', noStatementReason='')[1]['ok'] is False
     assert act(client, 'recordWitnessStatement', witnessId=w['id'], statementText='Saw a man run.', noStatementReason='')[1]['ok']

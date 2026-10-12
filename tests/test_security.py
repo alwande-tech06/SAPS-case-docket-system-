@@ -22,7 +22,7 @@ def test_security_headers_and_no_caching_of_pages(client):
 
 def test_pages_embed_only_what_the_reader_may_see(client):
     page = client.get('/').get_data(as_text=True)
-    assert 'window.SAPS_SNAPSHOT' in page
+    assert 'id="saps-snapshot"' in page
     assert 'Thandeka' not in page and 'official@saps.demo' not in page
 
 

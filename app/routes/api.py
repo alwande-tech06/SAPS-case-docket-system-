@@ -20,7 +20,7 @@ from io import BytesIO
 from flask import Blueprint, current_app, jsonify, request, send_file, session
 
 from ..extensions import db
-from ..models import Docket, Evidence, Intake, StoredFile, User
+from ..models import Docket, Evidence, Intake, StoredFile, User, Witness
 from ..security import allow, rate_limit, too_many
 from ..services import admin as admin_svc
 from ..services import dockets as docket_svc
@@ -482,7 +482,9 @@ def may_see_file(f, user):
         d = db.session.get(Docket, intake.docket_id) if intake and intake.docket_id else None
         return bool(d and d.station_id == user.station_id)
     ev = Evidence.query.filter((Evidence.image_data_url == f.url) | (Evidence.suspect_photo_data_url == f.url)).first()
-    d = db.session.get(Docket, ev.docket_id) if ev else None
+    # a photograph attached to a witness belongs to that witness's docket
+    held = ev or Witness.query.filter_by(photo_url=f.url).first()
+    d = db.session.get(Docket, held.docket_id) if held else None
     return bool(d and d.station_id == user.station_id)
 
 

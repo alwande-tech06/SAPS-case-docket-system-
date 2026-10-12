@@ -1,5 +1,8 @@
 /* commander.js — oversight dashboard */
 
+/* chart colours, in the order series are drawn (declared before the first render) */
+const SERIES = ['var(--accent)', 'var(--good)', 'var(--brass)', 'var(--critical)', 'var(--muted)', 'var(--alert)'];
+
 const me = requireRole('commander');
 if (me) { renderChrome('/dashboard-commander'); render(); }
 
@@ -118,23 +121,19 @@ function render() {
             : 'Every report received has been closed with a recorded outcome.'}
     </div>`;
 
-  /* refusals by official */
-  const byOfficer = Store.refusalsByOfficer(st);
-  const max = Math.max(1, ...byOfficer.map(r => r[1]));
-  document.getElementById('refusalChart').innerHTML = byOfficer.length ? byOfficer.map(([name, n]) => `
-    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
-      <div class="small" style="min-width:130px">${esc(name)}</div>
-      <div style="flex:1;background:var(--surface-sunk);border:1px solid var(--border-soft);height:16px">
-        <div style="width:${(n / max) * 100}%;height:100%;background:${n === max && n > 1 ? 'var(--alert)' : 'var(--accent)'}"></div>
-      </div>
-      <div class="ref small">${n}</div>
-    </div>`).join('') : '<div class="empty">No refusals recorded at this station.</div>';
+  /* every docket at the station, by where it stands — closed included, even at none */
+  const byStatus = Store.docketsByStatus(st).map(([status, n]) => [labelStatus(status), n]);
+  const caseCount = byStatus.reduce((t, r) => t + r[1], 0);
+  document.getElementById('statusPieChart').innerHTML = donutChart(byStatus, 'Share of cases by status');
+  document.getElementById('statusTotal').textContent = `${caseCount} case${caseCount === 1 ? '' : 's'}`;
 
   /* Decisions you declined to sign, by official. One is a disagreement; a run
      of them by one person is what this report exists to show. */
+  const followups = document.getElementById('refusalFollowups');
+  followups.innerHTML = '';
   const reversals = Store.reversalsByOfficer(st);
   if (reversals.length) {
-    document.getElementById('refusalChart').innerHTML += `
+    followups.innerHTML += `
       <div style="margin-top:1rem">
         <p class="small muted" style="margin:0 0 .4rem">Decisions not signed off, by official</p>
         ${reversals.map(r => `
@@ -149,12 +148,18 @@ function render() {
   /* Diagram 3 — reassignment patterns worth a second look. */
   const patterns = Store.reassignmentPatterns(st);
   if (patterns.length) {
-    document.getElementById('refusalChart').innerHTML += `
+    followups.innerHTML += `
       <div class="notice notice-alert" style="margin-top:.9rem">
         <strong>Reassignment pattern flagged for the oversight report</strong>
         ${patterns.map(p => esc(p.text)).join('<br>')}
       </div>`;
   }
+
+  /* cases opened, month by month */
+  const months = Store.docketsOpenedByMonth(st, 6);
+  document.getElementById('openedChart').innerHTML = lineChart(months);
+  document.getElementById('openedTotal').textContent =
+    `${months.reduce((t, m) => t + m.count, 0)} in six months`;
 
   renderCosignQueue();
 
@@ -173,6 +178,77 @@ function render() {
   }).join('');
 
   wire();
+}
+
+/* ---------------- charts ----------------
+   Drawn as SVG here rather than with a charting library: three small charts
+   do not justify one, and these take the theme's colours. */
+
+/* rows: [[label, count], ...]. A ring, with the legend under it; a row with
+   a count of zero has no slice but keeps its place in the legend. */
+function donutChart(rows, label) {
+  const total = rows.reduce((t, r) => t + r[1], 0);
+  const C = 100, R = 88, r = 52;
+  const drawn = rows.map((row, i) => ({ name: row[0], n: row[1], colour: SERIES[i % SERIES.length] })).filter(x => x.n > 0);
+  let angle = -Math.PI / 2;
+  const at = (rad, t) => `${(C + rad * Math.cos(t)).toFixed(2)} ${(C + rad * Math.sin(t)).toFixed(2)}`;
+  const slices = !total
+    ? `<circle cx="${C}" cy="${C}" r="${(R + r) / 2}" fill="none" stroke="var(--border)" stroke-width="${R - r}"/>`
+    : drawn.map(x => {
+      const share = x.n / total;
+      const title = `<title>${esc(x.name)}: ${x.n} (${Math.round(share * 100)}%)</title>`;
+      if (drawn.length === 1) {
+        return `<circle cx="${C}" cy="${C}" r="${(R + r) / 2}" fill="none" stroke="${x.colour}" stroke-width="${R - r}">${title}</circle>`;
+      }
+      const from = angle, to = angle + share * 2 * Math.PI, big = share > .5 ? 1 : 0;
+      angle = to;
+      return `<path d="M${at(R, from)} A${R} ${R} 0 ${big} 1 ${at(R, to)} L${at(r, to)} A${r} ${r} 0 ${big} 0 ${at(r, from)} Z"
+        fill="${x.colour}" stroke="var(--surface)" stroke-width="2.5">${title}</path>`;
+    }).join('');
+  return `<div class="donut">
+    <svg viewBox="0 0 200 200" role="img" aria-label="${esc(label || 'Shares')}">${slices}
+      <text x="${C}" y="${C - 2}" text-anchor="middle" class="donut-total">${total}</text>
+      <text x="${C}" y="${C + 16}" text-anchor="middle" class="chart-axis">cases</text></svg>
+    <ul class="donut-legend">${rows.map(([name, n], i) => `
+      <li><span class="swatch" style="background:${SERIES[i % SERIES.length]}"></span>
+        <span class="small">${esc(name)}</span>
+        <span class="ref small muted">${n}${total ? ` · ${Math.round((n / total) * 100)}%` : ''}</span></li>`).join('')}</ul>
+  </div>`;
+}
+
+/* months: [{ label, count }, ...] oldest first. A smooth line over a soft fill. */
+function lineChart(months) {
+  const W = 640, H = 300, L = 34, Rm = 18, T = 24, B = 36;
+  const top = Math.max(4, Math.ceil(Math.max(...months.map(m => m.count)) / 4) * 4);
+  const x = i => L + (months.length === 1 ? 0 : i * (W - L - Rm) / (months.length - 1));
+  const y = v => T + (H - T - B) * (1 - v / top);
+  const grid = [0, 1, 2, 3, 4].map(k => {
+    const v = top * k / 4;
+    return `<line x1="${L}" x2="${W - Rm}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"/>
+      <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" class="chart-axis">${v}</text>`;
+  }).join('') + months.map((m, i) =>
+    `<line x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${y(0)}" stroke="var(--border-soft)" stroke-width="1"/>`).join('');
+  /* Each segment leaves and arrives level, so the curve never dips below
+     zero or rises above a point between two months. */
+  const curve = months.map((m, i) => {
+    if (i === 0) return `M${x(0).toFixed(1)} ${y(m.count).toFixed(1)}`;
+    const mid = ((x(i - 1) + x(i)) / 2).toFixed(1);
+    return `C${mid} ${y(months[i - 1].count).toFixed(1)} ${mid} ${y(m.count).toFixed(1)} ${x(i).toFixed(1)} ${y(m.count).toFixed(1)}`;
+  }).join(' ');
+  const last = months.length - 1;
+  return `<svg class="line-chart" viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="Cases opened per month: ${months.map(m => `${m.label} ${m.count}`).join(', ')}">
+    ${grid}
+    <path d="${curve} L${x(last).toFixed(1)} ${y(0)} L${x(0).toFixed(1)} ${y(0)} Z" fill="var(--accent-wash)"/>
+    <path d="${curve}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+    ${months.map((m, i) => `
+      <circle cx="${x(i)}" cy="${y(m.count)}" r="4" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5">
+        <title>${esc(m.label)}: ${m.count} opened</title></circle>
+      <text x="${x(i)}" y="${y(m.count) - 10}" text-anchor="${i === 0 ? 'start' : i === last ? 'end' : 'middle'}"
+        class="chart-value">${m.count}</text>
+      <text x="${x(i)}" y="${H - 12}" text-anchor="${i === 0 ? 'start' : i === last ? 'end' : 'middle'}"
+        class="chart-axis">${esc(m.label)}</text>`).join('')}
+  </svg>`;
 }
 
 function wire() {

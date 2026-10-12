@@ -1,6 +1,6 @@
 /* report.js — public reporting flow (no account required) */
 
-renderPublicHeader();
+renderPublicHeader({ home: true });
 
 /* ---------------- the optional pin on the map ---------------- */
 /* The address box and the pin follow each other: typing an address puts the

@@ -41,20 +41,15 @@
     <div id="stationList"></div>
   </div>
 
-  <div class="btn-row" style="margin-top:1.2rem">
-    <a class="btn btn-primary" href="{{ url_for('pages.report') }}">Report a crime online</a>
-    <a class="btn" href="{{ url_for('pages.track') }}">Track a report</a>
-    <a class="btn" href="{{ url_for('pages.index') }}">Home</a>
-  </div>
 </main>
 
-<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script id="saps-snapshot" type="application/json">{{ store_snapshot()|tojson }}</script>
 <script src="{{ url_for('static', filename='js/store.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script src="{{ url_for('static', filename='js/vendor-leaflet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/maps.js') }}"></script>
 <script>
-renderPublicHeader();
+renderPublicHeader({ home: true });
 const stations = Store.stations();
 
 function stationHtml(s) {

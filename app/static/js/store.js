@@ -3,7 +3,7 @@
    --------------------------------------------------------------------------
    The data lives on the server (PostgreSQL, app/models.py). When Flask
    renders a page it embeds everything that page's reader may see as
-   window.SAPS_SNAPSHOT — a staff member's own station, a complainant's own
+   the page's saps-snapshot block — a staff member's own station, a complainant's own
    reports, or just reference data for anyone else — so every read below is
    synchronous, exactly as the pages have always used it.
 
@@ -237,7 +237,16 @@ function emptySnapshot() {
   return s;
 }
 
-let snapshot = (typeof window !== 'undefined' && window.SAPS_SNAPSHOT) || emptySnapshot();
+/* The page carries it as a JSON block (<script id="saps-snapshot"
+   type="application/json">), which is data, not code: nothing in it can run,
+   and editors do not mistake the template tag for broken JavaScript. */
+function embeddedSnapshot() {
+  if (typeof document === 'undefined') return null;
+  const el = document.getElementById('saps-snapshot');
+  if (!el) return null;
+  try { return JSON.parse(el.textContent); } catch (e) { return null; }
+}
+let snapshot = embeddedSnapshot() || emptySnapshot();
 
 function read() { return snapshot; }
 
@@ -909,6 +918,15 @@ const Store = {
 
   notes(docketId) { return read().notes.filter(n => n.docket_id === Number(docketId)); },
 
+  /* Has anything been done on this docket: a diary entry, a witness, an
+     exhibit or a forensic submission? A commander's instruction is not. */
+  investigationRecorded(docketId) {
+    const id = Number(docketId), db = read();
+    return db.notes.some(n => n.docket_id === id && n.note_type !== 'instruction') ||
+      db.witnesses.some(w => w.docket_id === id) || db.evidence.some(e => e.docket_id === id) ||
+      db.forensics.some(f => f.docket_id === id);
+  },
+
   addInstruction(docketId, actor, text) {
     return act('addInstruction', { docketId, text });
   },
@@ -1197,6 +1215,33 @@ const Store = {
       out[key] = (out[key] || 0) + 1;
     });
     return Object.entries(out).sort((a, b) => b[1] - a[1]);
+  },
+
+  /* How many of the station's dockets are at each status, in the order a
+     docket moves through them: [[status, count], ...]. Every status is
+     listed, closed included, even when no docket is at it. */
+  docketsByStatus(stationId) {
+    const counts = { awaiting_assignment: 0, registered: 0, under_investigation: 0, sent_to_prosecutor: 0, closed: 0 };
+    read().dockets.filter(d => !stationId || d.station_id === stationId)
+      .forEach(d => { counts[d.current_status] = (counts[d.current_status] || 0) + 1; });
+    return Object.entries(counts);
+  },
+
+  /* Dockets registered in each of the last `count` calendar months, oldest first. */
+  docketsOpenedByMonth(stationId, count = 6) {
+    const now = new Date();
+    const months = [];
+    for (let i = count - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ year: d.getFullYear(), month: d.getMonth(), count: 0,
+                    label: d.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }) });
+    }
+    read().dockets.filter(d => !stationId || d.station_id === stationId).forEach(d => {
+      const at = new Date(d.registered_at);
+      const m = months.find(x => x.year === at.getFullYear() && x.month === at.getMonth());
+      if (m) m.count++;
+    });
+    return months;
   },
 
   refusals(stationId) {

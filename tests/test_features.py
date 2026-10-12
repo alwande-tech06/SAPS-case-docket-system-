@@ -7,7 +7,7 @@ from app.models import (AuditLog, Docket, DocketMovement, Intake, Note, StaffNot
                         SupervisoryReview, User)
 from app.services.common import now
 
-from .conftest import act, login
+from .conftest import act, login, start_investigation
 from .test_intakes import file_report
 
 
@@ -162,6 +162,7 @@ def test_seeded_dockets_start_signed_for_and_quiet(app):
 def test_diary_entries_record_type_outcome_and_next_action(client, as_role):
     theft = docket_of('INT-2026-DBN-000001')
     as_role('detective')
+    start_investigation(client, theft.id)
     act(client, 'addNote', docketId=theft.id, text='Interviewed the car guard.',
         entry={'entry_type': 'witness_interview', 'outcome': 'He saw a white Polo.', 'next_action': 'Trace the Polo.'})
     act(client, 'addNote', docketId=theft.id, text='Plain note, as before.')
@@ -273,3 +274,61 @@ def test_personnel_number_is_unique_and_profile_is_your_own(client, as_role):
 
 def test_stations_have_a_place_on_the_map(app):
     assert all(s.latitude and s.longitude and s.address for s in Station.query)
+
+
+# ----- witnesses -----
+
+def test_a_witness_can_carry_a_description_and_a_photo_but_needs_neither(client, as_role):
+    from app.models import Witness
+    theft = docket_of('INT-2026-DBN-000001')
+    as_role('detective')
+    start_investigation(client, theft.id)
+    assert act(client, 'addWitness', docketId=theft.id, payload={'name': 'Plain Witness'})[1]['ok']
+    png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+    res = act(client, 'addWitness', docketId=theft.id,
+              payload={'name': 'Zanele Moyo', 'description': 'Saw the suspect leave by the back gate.',
+                       'photo_data_url': png})[1]
+    assert res['ok'] and res['witness']['description'].startswith('Saw the suspect')
+    assert res['witness']['photo_url'].startswith('/api/files/')
+    assert client.get(res['witness']['photo_url']).status_code == 200
+    plain = Witness.query.filter_by(name='Plain Witness').one()
+    assert plain.description == '' and plain.photo_url is None
+    assert act(client, 'addWitness', docketId=theft.id,
+               payload={'name': 'Bad File', 'photo_data_url': 'not a file'})[1]['ok'] is False
+
+
+# ----- the order of an investigation -----
+
+def test_a_docket_is_worked_in_order(client, as_role):
+    from app.models import Arrest
+    theft = docket_of('INT-2026-DBN-000001')                    # registered, signed for, nothing recorded
+    arrest = {'accused_name': 'J. Doe', 'charge_description': 'Theft'}
+    prosecutor = {'recipient_name': 'Adv. Nkosi', 'recipient_organisation': 'NPA Durban'}
+    as_role('detective')
+
+    # nothing before the investigation is started
+    status, _, _ = act(client, 'addNote', docketId=theft.id, text='Too early.')
+    assert status == 409 and Note.query.filter_by(docket_id=theft.id).count() == 0
+    assert act(client, 'addArrest', docketId=theft.id, payload=arrest)[0] == 409
+
+    # started, but nothing investigated: no arrest, no prosecutor
+    start_investigation(client, theft.id)
+    r = client.post('/api/actions/addArrest', json={'docketId': theft.id, 'payload': arrest})
+    assert r.status_code == 409 and 'before recording an arrest' in r.json['error']
+    assert act(client, 'handover', docketId=theft.id, payload=prosecutor)[0] == 409
+    assert Arrest.query.filter_by(docket_id=theft.id).count() == 0
+
+    # one investigation entry opens both
+    assert act(client, 'addNote', docketId=theft.id, text='Canvassed the street; one camera found.')[0] == 200
+    assert act(client, 'addArrest', docketId=theft.id, payload=arrest)[0] == 200
+    assert Arrest.query.filter_by(docket_id=theft.id).count() == 1
+    assert act(client, 'handover', docketId=theft.id, payload=prosecutor)[0] == 200
+
+
+def test_nothing_is_recorded_on_a_docket_that_is_not_signed_for(client, as_role):
+    theft = docket_of('INT-2026-DBN-000001')
+    DocketMovement.query.filter_by(docket_id=theft.id).one().acknowledged_at = None
+    db.session.commit()
+    as_role('detective')
+    r = client.post('/api/actions/addWitness', json={'docketId': theft.id, 'payload': {'name': 'Early Witness'}})
+    assert r.status_code == 409 and 'Acknowledge receipt' in r.json['error']

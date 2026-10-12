@@ -767,3 +767,39 @@ a.bell-item:hover { background: var(--surface-sunk); }
 @media (max-width: 1000px) { .flow-step::after { display: none; } }
 
 .custody { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0 0 .8rem; }
+
+/* ---------- a rule from the guide, shown over the page (and over a modal) ---------- */
+.rule-back { position: fixed; inset: 0; background: rgba(20,24,31,.55); display: none; place-items: center;
+  padding: 1rem; z-index: 60; }
+.rule-back.open { display: grid; }
+.rule-pop { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 24px 64px rgba(20,24,31,.28); max-width: 520px; width: 100%; padding: 1.3rem;
+  max-height: 84vh; overflow-y: auto; }
+.rule-pop .rule { border-left: 3px solid var(--accent); padding-left: .9rem; }
+.rule-pop .rule.no { border-left-color: var(--alert); }
+.rule-pop .rule.yes { border-left-color: var(--good); }
+.rule-pop .rule h4 { margin: 0 0 .4rem; font-size: 1.05rem; }
+.rule-pop .rule p, .rule-pop .rule li { font-size: .92rem; }
+.rule-pop .rule ul { margin: .35rem 0 0; padding-left: 1.1rem; }
+.rule-pop .rule .src { display: block; margin-top: .6rem; font-size: .78rem; color: var(--muted); }
+@media print { .rule-back { display: none !important; } }
+
+/* ---------- oversight charts ---------- */
+.oversight-charts { display: grid; gap: 1rem; grid-template-columns: 1fr; align-items: stretch; }
+@media (min-width: 900px) { .oversight-charts { grid-template-columns: 2fr 1fr; } }
+.line-chart { width: 100%; height: auto; display: block; }
+.chart-axis { font-size: 11px; fill: var(--muted); font-family: var(--sans); }
+.chart-value { font-size: 12px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
+.donut { display: flex; flex-direction: column; align-items: center; gap: .9rem; }
+.donut svg { width: 100%; max-width: 210px; height: auto; }
+.donut-total { font-size: 30px; font-weight: 700; fill: var(--ink); font-family: var(--sans); }
+.donut-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center;
+  gap: .35rem 1rem; }
+.donut-legend li { display: flex; align-items: center; gap: .4rem; }
+.donut-legend .swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+.witness-photo { display: block; margin-top: .3rem; }
+
+/* a step that has not opened yet */
+.flow-step.is-locked { background: transparent; border-style: dashed; }
+.flow-step.is-locked .flow-head strong, .flow-step.is-locked .flow-num { color: var(--muted-soft); }
+.flow-step .btn:disabled { opacity: .45; cursor: not-allowed; }

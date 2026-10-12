@@ -22,7 +22,7 @@
   </div>
   <section id="trail" style="margin-top:2rem"></section>
 </main>
-<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script id="saps-snapshot" type="application/json">{{ store_snapshot()|tojson }}</script>
 <script src="{{ url_for('static', filename='js/store.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script>

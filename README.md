@@ -14,7 +14,7 @@ browser ── /api/... (JSON) ──────┘
 ```
 
 - **Pages** are the templates in `app/templates/`. When Flask renders one, it
-  embeds the data that person may see (`window.SAPS_SNAPSHOT`): a staff
+  embeds the data that person may see (a `saps-snapshot` JSON block): a staff
   member's own station, a complainant's own reports, or only reference data for
   anyone else. `app/static/js/store.js` reads it, so screens and the rules
   engine (`rules.js`) read synchronously.

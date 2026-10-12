@@ -1,82 +1,60 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-ZA">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>What happens after you report - Case Docket Accountability System</title>
+<title>What happens after you report - SAPS Case Docket Accountability System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 <style>
-  :root{
-    --navy:#12315c; --navy-dark:#0d2545; --ink:#1c1c1c; --muted:#5a6673;
-    --line:#d7dde4; --bg:#f4f6f9; --white:#fff; --red:#b3261e; --amber:#8a5a00;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.55}
-  header{background:var(--navy);color:#fff;padding:18px 20px}
-  header .wrap{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:14px}
-  .badge{background:#fff;color:var(--navy);font-weight:700;font-size:12px;
-         padding:8px 10px;border-radius:6px;letter-spacing:.5px}
-  header h1{font-size:19px;margin:0}
-  header p{margin:2px 0 0;font-size:13px;opacity:.85}
-  header .back{margin-left:auto;color:#fff;font-size:13px;text-decoration:none;
-               border:1px solid rgba(255,255,255,.45);padding:7px 12px;border-radius:6px;white-space:nowrap}
-  header .back:hover{background:rgba(255,255,255,.12)}
-  main{max-width:900px;margin:0 auto;padding:24px 20px 60px}
-  .emergency{background:#fdecea;border:1px solid #f3b7b2;color:var(--red);
-             padding:12px 14px;border-radius:8px;font-weight:600;margin-bottom:22px}
-  h2{font-size:20px;margin:30px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--line)}
-  h3{font-size:15px;margin:18px 0 6px}
-  p,li{font-size:15px}
-  .card{background:var(--white);border:1px solid var(--line);border-radius:10px;
-        padding:18px 20px;margin-bottom:16px}
-  ol.step-list{counter-reset:s;list-style:none;padding:0;margin:0}
-  ol.step-list li{counter-increment:s;position:relative;padding:0 0 18px 46px;
-              border-left:2px solid var(--line);margin-left:16px}
-  ol.step-list li:last-child{border-left:2px solid transparent;padding-bottom:0}
-  ol.step-list li::before{content:counter(s);position:absolute;left:-17px;top:-2px;
-       width:32px;height:32px;border-radius:50%;background:var(--navy);color:#fff;
-       display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
-  ol.step-list strong{display:block;margin-bottom:2px}
-  .meta{color:var(--muted);font-size:13px}
-  details{background:var(--white);border:1px solid var(--line);border-radius:10px;
-          margin-bottom:10px;overflow:hidden}
-  details summary{cursor:pointer;padding:14px 18px;font-weight:600;list-style:none;
-                  display:flex;justify-content:space-between;align-items:center}
-  details summary::-webkit-details-marker{display:none}
-  details summary::after{content:"+";color:var(--navy);font-size:20px;font-weight:700}
-  details[open] summary::after{content:"\2013"}
-  details[open] summary{background:#eef2f7;border-bottom:1px solid var(--line)}
-  .body{padding:14px 18px 18px}
-  .body h4{margin:14px 0 4px;font-size:14px;color:var(--navy-dark)}
-  .body ul{margin:4px 0 0;padding-left:20px}
-  .note{background:#fff8e6;border:1px solid #f0dcaa;color:var(--amber);
-        padding:10px 12px;border-radius:8px;font-size:14px;margin-top:12px}
-  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}
-  th,td{text-align:left;border-bottom:1px solid var(--line);padding:9px 8px;vertical-align:top}
-  th{background:#eef2f7;font-size:13px}
-  .rights li{margin-bottom:6px}
-  footer{max-width:900px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:13px}
-  a{color:var(--navy)}
+  /* This page's own pieces, in the system's colours so they follow the theme. */
+  .next h2 { margin: 2rem 0 .8rem; }
+  .next .card { margin-bottom: 1rem; }
+  .next .card > ul, .next .card > p { font-size: .93rem; }
+  .next .card > ul { margin: 0; padding-left: 1.2rem; }
+  .next .card > ul li { margin-bottom: .45rem; }
+  .next ol.step-list { counter-reset: s; list-style: none; padding: 0; margin: 0; font-size: .93rem; }
+  .next ol.step-list li { counter-increment: s; position: relative; padding: 0 0 1.1rem 2.6rem;
+    border-left: 2px solid var(--border); margin-left: 1rem; }
+  .next ol.step-list li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .next ol.step-list li::before { content: counter(s); position: absolute; left: -16px; top: -3px;
+    width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--surface);
+    display: grid; place-items: center; font-weight: 700; font-size: .82rem; }
+  .next ol.step-list strong { display: block; margin-bottom: .1rem; }
+  .next .meta { color: var(--muted); font-size: .82rem; }
+  .next details { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: .6rem; overflow: hidden; }
+  .next details summary { cursor: pointer; padding: .8rem 1.05rem; font-weight: 600; list-style: none;
+    display: flex; justify-content: space-between; align-items: center; }
+  .next details summary::-webkit-details-marker { display: none; }
+  .next details summary::after { content: "+"; color: var(--accent); font-size: 1.2rem; font-weight: 700; }
+  .next details[open] summary::after { content: "–"; }
+  .next details[open] summary { background: var(--surface-sunk); border-bottom: 1px solid var(--border-soft); }
+  .next .body { padding: .6rem 1.05rem 1rem; font-size: .92rem; }
+  .next .body h4 { margin: .8rem 0 .2rem; font-size: .86rem; color: var(--accent); }
+  .next .body ul { margin: .2rem 0 0; padding-left: 1.2rem; }
+  .next .note { background: var(--brass-wash); border-left: 3px solid var(--brass); color: var(--ink);
+    padding: .65rem .8rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: .88rem; margin-top: .8rem; }
+  .next td { font-size: .9rem; }
+  .next tbody tr:hover { background: none; }
+  .next footer { color: var(--muted); font-size: .82rem; margin-top: 1.6rem; }
 </style>
 <script>try{if(localStorage.getItem('saps_theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 </head>
 <body>
+<div id="chrome"></div>
 
-<header>
-  <div class="wrap">
-    <span class="badge">SAPS</span>
-    <div>
-      <h1>What happens after you report a crime</h1>
-      <p>Case Docket Accountability System · South African Police Service</p>
-    </div>
-    <a class="back" href="{{ url_for('pages.report') }}">Back to reporting</a>
+<main class="wrap next" style="max-width:980px">
+  <p class="eyebrow">South African Police Service</p>
+  <h1>What happens after you report a crime</h1>
+
+  <div class="notice notice-alert" style="margin-top:1rem">
+    <strong>Emergency in progress?</strong>
+    Call 10111. Do not use this form.
   </div>
-</header>
-
-<main>
-
-  <div class="emergency">Emergency in progress? Call 10111. Do not use this form.</div>
 
   <p>This page explains what the police must do once you report, what you will be asked
      to do, and what to do if nothing happens. Reporting online starts the process; your
@@ -430,12 +408,20 @@
        the ends of justice.</p>
   </div>
 
+  <div class="btn-row" style="margin-top:1.4rem">
+    <a class="btn btn-primary" href="{{ url_for('pages.report') }}">Back to reporting</a>
+    <a class="btn" href="{{ url_for('pages.track') }}">Track a report</a>
+  </div>
+
+  <footer>
+    This guide explains the process in general terms and is not legal advice. Prepared for the
+    Case Docket Accountability System.
+  </footer>
 </main>
 
-<footer>
-  This guide explains the process in general terms and is not legal advice. Prepared for the
-  Case Docket Accountability System.
-</footer>
-
+<script id="saps-snapshot" type="application/json">{{ store_snapshot()|tojson }}</script>
+<script src="{{ url_for('static', filename='js/store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script>renderPublicHeader({ home: true });</script>
 </body>
 </html>

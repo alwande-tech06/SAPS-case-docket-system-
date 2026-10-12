@@ -348,6 +348,10 @@ class Witness(Record, db.Model):
     statement_taken_at = ts()
     no_statement_reason = db.Column(db.Text, nullable=False, default='')
     reported_by_complainant = db.Column(db.Boolean, nullable=False, default=False)
+    # What the witness saw or can speak to, and a photograph of any evidence
+    # they point to (a file URL). Both optional.
+    description = db.Column(db.Text, nullable=False, default='', server_default='')
+    photo_url = db.Column(db.String(255))
 
 
 class Forensic(Record, db.Model):

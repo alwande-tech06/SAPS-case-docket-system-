@@ -25,6 +25,23 @@
 
   <section id="cosign" style="margin-top:1.6rem"></section>
 
+  <div class="oversight-charts" style="margin-top:1.6rem">
+    <section class="card" aria-labelledby="openedHeading">
+      <div class="card-head"><h3 id="openedHeading">Cases opened per month</h3>
+        <span class="small muted" id="openedTotal"></span></div>
+      <div id="openedChart"></div>
+      <p class="small muted" style="margin:.6rem 0 0">Dockets registered at this station in each of the last six months.</p>
+    </section>
+
+    <section class="card" aria-labelledby="statusHeading">
+      <div class="card-head"><h3 id="statusHeading">Cases by status</h3>
+        <span class="small muted" id="statusTotal"></span></div>
+      <div id="statusPieChart"></div>
+    </section>
+  </div>
+
+  <div id="refusalFollowups"></div>
+
   <div class="split" style="margin-top:1.6rem">
     <div>
       <div class="folder" data-tab="Requires your attention">
@@ -45,13 +62,6 @@
 
     <div>
       <div class="card">
-        <div class="card-head"><h3>Refusals by official</h3></div>
-        <div id="refusalChart"></div>
-        <p class="small muted" style="margin:.8rem 0 0">Counted across all reports at this station.
-        A single outlier is worth a conversation; a pattern is worth a review.</p>
-      </div>
-
-      <div class="card" style="margin-top:1rem">
         <div class="card-head"><h3>Detective availability</h3></div>
         <div id="detAvail"></div>
       </div>
@@ -60,7 +70,7 @@
 </main>
 
 
-<script>window.SAPS_SNAPSHOT = {{ store_snapshot()|tojson }};</script>
+<script id="saps-snapshot" type="application/json">{{ store_snapshot()|tojson }}</script>
 <script src="{{ url_for('static', filename='js/store.js') }}"></script>
 <script src="{{ url_for('static', filename='js/rules.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
